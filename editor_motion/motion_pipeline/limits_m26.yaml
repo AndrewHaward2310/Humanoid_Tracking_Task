@@ -1,0 +1,32 @@
+# Default kinematic limits for M26 joints when MJCF doesn't expose them.
+# Limits below are conservative — measured under PD tracking on real hardware
+# with action_scale = 0.25 * effort / stiffness.
+defaults:
+  vel_max: 12.0       # rad/s (arms-class default)
+  acc_max: 50.0       # rad/s^2
+  effort_max: 100.0   # Nm
+  soft_factor: 0.9    # joint_pos clamp uses [lo + 5%, hi - 5%]
+
+# Regex-keyed overrides applied in declaration order; later keys win.
+joint_overrides:
+  ".*_hip_(pitch|roll|yaw)_joint":
+    vel_max: 8.0
+    acc_max: 40.0
+  ".*_knee_joint":
+    vel_max: 8.0
+    acc_max: 40.0
+  ".*_ankle_(pitch|roll)_joint":
+    vel_max: 10.0
+    acc_max: 60.0
+  "waist_joint":
+    vel_max: 4.0
+    acc_max: 30.0
+  ".*_shoulder_(pitch|roll|yaw)_joint":
+    vel_max: 12.0
+    acc_max: 60.0
+  ".*_elbow_joint":
+    vel_max: 12.0
+    acc_max: 60.0
+  ".*_wrist_(pitch|roll|yaw)_joint":
+    vel_max: 14.0
+    acc_max: 80.0

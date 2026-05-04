@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="short linkage">
+  <link
+    name="short_linkage">
+    <inertial>
+      <origin
+        xyz="-0.0835930721919286 6.06459077329136E-06 -0.00481486414450784"
+        rpy="0 0 0" />
+      <mass
+        value="0.11572141963369" />
+      <inertia
+        ixx="3.23880110553235E-06"
+        ixy="5.80517308389735E-07"
+        ixz="-5.80226043150348E-07"
+        iyy="0.000300934774084005"
+        iyz="4.69786856045314E-10"
+        izz="0.000300908689092935" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://short linkage/meshes/short_linkage.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://short linkage/meshes/short_linkage.STL" />
+      </geometry>
+    </collision>
+  </link>
+</robot>

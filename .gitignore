@@ -1,0 +1,80 @@
+# =============================================================================
+# Humanoid_Tracking_Task .gitignore
+# Track only the user's own work: editor_motion/, scripts/, notebooks/, docs/,
+# CLAUDE.md, root configs. Everything else (third-party clones, data, archives,
+# logs, large model files) is ignored.
+# =============================================================================
+
+# --- Third-party / external clones (each has its own git remote) -------------
+mjlab/
+vm_video2robot/
+vm_retargeting/
+
+# --- Frozen archives (do not push 173MB+ of old editor versions) -------------
+archive/
+
+# --- Data / experiment outputs (large + per-machine) -------------------------
+data/
+experiments/
+
+# --- Notebook checkpoints & outputs -----------------------------------------
+**/.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Model weights / motion data (never commit; use external storage) -------
+*.npz
+*.pkl
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.safetensors
+*.h5
+
+# --- Media files (large) -----------------------------------------------------
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# --- Backups -----------------------------------------------------------------
+*.bak
+*.bak_*
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# --- IDE / OS ----------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# --- Local AI assistant context ---------------------------------------------
+.claude/
+# CLAUDE.md is intentionally NOT ignored — these are committed navigation
+# indexes. If you want to keep them local-only, uncomment the next line:
+# **/CLAUDE.md
+
+# --- GitNexus index (regenerate locally) -------------------------------------
+.gitnexus/

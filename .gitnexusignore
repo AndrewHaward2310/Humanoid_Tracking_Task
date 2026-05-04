@@ -1,0 +1,47 @@
+# GitNexus — exclude from code graph index
+# (Most of these are also gitignored, but list explicitly so gitnexus respects
+#  them even when run before git init or in dirty trees.)
+
+# Third-party clones (index those repos separately if desired)
+mjlab/
+vm_video2robot/
+vm_retargeting/
+archive/
+
+# Data / experiments / large binaries
+data/
+experiments/
+*.npz
+*.pkl
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.safetensors
+*.h5
+*.mp4
+*.mov
+*.avi
+
+# Mesh / asset binaries — content not useful to graph
+*.stl
+*.STL
+*.obj
+*.dae
+*.glb
+*.gltf
+*.fbx
+*.bvh
+
+# Python / Node noise
+__pycache__/
+.venv/
+venv/
+node_modules/
+dist/
+build/
+
+# Jupyter checkpoints + IDE
+.ipynb_checkpoints/
+.vscode/
+.idea/

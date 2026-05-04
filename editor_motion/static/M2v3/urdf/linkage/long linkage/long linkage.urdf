@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="long linkage">
+  <link
+    name="long_linkage">
+    <inertial>
+      <origin
+        xyz="-0.125000348333084 4.22189190520209E-06 -0.00487016541039477"
+        rpy="0 0 0" />
+      <mass
+        value="0.151472257163149" />
+      <inertia
+        ixx="3.81594951236455E-06"
+        ixy="8.78326710537431E-07"
+        ixz="-8.78703340172108E-07"
+        iyy="0.000868155090842529"
+        iyz="4.02056072010766E-10"
+        izz="0.000868209009117137" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://long linkage/meshes/long_linkage.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://long linkage/meshes/long_linkage.STL" />
+      </geometry>
+    </collision>
+  </link>
+</robot>

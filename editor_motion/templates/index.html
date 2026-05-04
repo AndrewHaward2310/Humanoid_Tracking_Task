@@ -1,0 +1,1813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Robot Motion Editor v3</title>
+<style>
+  body { margin:0; overflow:hidden; font-family:sans-serif; background:#2d2d2d; color:#222; }
+  * { user-select:none; }
+
+  /* === Left sidebar === */
+  #sidebar {
+    position:absolute; top:10px; left:10px; background:rgba(255,255,255,0.95);
+    padding:12px; border-radius:8px; width:280px;
+    max-height:calc(100vh - 40px); overflow-y:auto;
+    box-shadow:0 4px 15px rgba(0,0,0,0.3); z-index:100;
+    display:flex; flex-direction:column; gap:8px; user-select:text;
+  }
+  /* Collapsible section headers */
+  details > summary.section-label { margin-top:4px; }
+  details > summary.section-label::-webkit-details-marker { display:none; }
+  details[open] > summary span:last-child { transform:rotate(180deg); display:inline-block; }
+  .section-label {
+    font-weight:bold; font-size:11px; color:#666; text-transform:uppercase;
+    margin-top:8px; border-bottom:1px solid #ddd; padding-bottom:2px;
+  }
+  #jointListContainer {
+    max-height:260px; overflow-y:auto; border:1px solid #ccc; background:#f9f9f9;
+  }
+  .joint-item {
+    padding:5px 6px; cursor:pointer; font-size:11px; border-bottom:1px solid #eee;
+  }
+  .joint-item.active { background:#007bff; color:white; }
+  .joint-item.special { background:#eef; font-weight:500; }
+  .joint-item .mini { float:right; color:#888; font-size:10px; }
+  .joint-item.active .mini { color:#ddeeff; }
+
+  input[type=text], input[type=number] {
+    width:100%; box-sizing:border-box; padding:5px; margin-bottom:3px;
+    font-size:12px; border:1px solid #bbb; border-radius:3px;
+  }
+  button {
+    padding:6px; cursor:pointer; background:#007bff; color:white;
+    border:none; border-radius:3px; font-weight:bold; font-size:11px;
+    transition:background 0.15s;
+  }
+  button:hover { background:#0056b3; }
+  button:disabled { background:#888; cursor:not-allowed; }
+  button.sec { background:#6c757d; }
+  button.sec:hover { background:#495057; }
+  button.success { background:#28a745; }
+  button.warning { background:#ffc107; color:#000; }
+  button.danger { background:#dc3545; }
+
+  /* === Right control panel === */
+  #ctrlPanel {
+    position:absolute; top:10px; right:10px; width:260px;
+    background:rgba(255,255,255,0.95); padding:12px; border-radius:8px;
+    box-shadow:0 4px 15px rgba(0,0,0,0.3); z-index:100;
+    display:none; flex-direction:column; gap:8px; user-select:text;
+  }
+  #ctrlPanel .row { display:flex; gap:4px; align-items:center; }
+  #ctrlPanel .row > * { flex:1; }
+  #ctrlPanel .vbox { display:flex; flex-direction:column; gap:4px; }
+  #ctrlPanel .small { font-size:10px; color:#666; }
+  #ctrlPanel .tag {
+    display:inline-block; padding:2px 6px; border-radius:3px;
+    font-size:10px; font-weight:bold;
+  }
+  .tag.red { background:#ffe0e0; color:#c00; }
+  .tag.green { background:#e0ffe8; color:#0a0; }
+  .tag.orange { background:#ffedd0; color:#c60; }
+
+  /* === Bottom editor === */
+  #curveEditor {
+    position:absolute; bottom:0; left:0; width:100%; height:38vh;
+    background:#fff; border-top:2px solid #444; z-index:100;
+    display:none;
+  }
+  canvas#nativeCurveCanvas {
+    width:100%; height:100%; display:block; cursor:crosshair;
+  }
+  #editorControls {
+    position:absolute; top:6px; left:10px; right:10px;
+    display:flex; justify-content:space-between; pointer-events:none;
+    font-size:12px; gap:8px;
+  }
+  .control-box {
+    pointer-events:auto; background:rgba(255,255,255,0.9);
+    padding:3px 8px; border-radius:4px; border:1px solid #ccc; font-size:11px;
+  }
+  #rangeToolbar {
+    position:absolute; top:30px; left:10px;
+    background:rgba(255,255,255,0.95); padding:4px 8px; border-radius:4px;
+    border:1px solid #ccc; display:none; gap:4px; align-items:center;
+    font-size:11px; pointer-events:auto;
+  }
+  #rangeToolbar button { padding:3px 8px; font-size:10px; }
+  #timelineWrapper {
+    position:absolute; bottom:3px; left:10px; right:10px; height:24px;
+    display:flex; align-items:center; gap:8px; z-index:102;
+    background:rgba(255,255,255,0.85); padding:0 8px; border-radius:12px;
+    font-size:11px; pointer-events:auto;
+  }
+  input[type=range] { flex:1; cursor:pointer; }
+
+  /* Status bar */
+  #statusBar {
+    position:absolute; top:10px; left:50%; transform:translateX(-50%);
+    background:rgba(0,0,0,0.7); color:#fff; padding:4px 12px;
+    border-radius:12px; font-size:11px; z-index:105; display:none;
+  }
+
+  /* === Pipeline section === */
+  #pipelineList {
+    border:1px solid #ccc; background:#f9f9f9; max-height:180px; overflow-y:auto;
+    border-radius:3px; flex-shrink:0;
+  }
+  .pl-row {
+    display:flex; align-items:center; gap:4px; padding:4px 6px;
+    border-bottom:1px solid #eee; font-size:11px;
+  }
+  .pl-row:last-child { border-bottom:none; }
+  .pl-row .pl-name { flex:1; cursor:pointer; }
+  .pl-row .pl-name:hover { color:#007bff; text-decoration:underline; }
+  .pl-row.disabled .pl-name { color:#aaa; }
+  .pl-row .pl-status {
+    display:inline-block; min-width:36px; padding:1px 4px; border-radius:3px;
+    font-size:9px; text-align:center; color:#666; background:#eee;
+  }
+  .pl-row .pl-status.ok    { background:#d4edda; color:#155724; }
+  .pl-row .pl-status.warn  { background:#fff3cd; color:#856404; }
+  .pl-row .pl-status.err   { background:#f8d7da; color:#721c24; }
+  .pl-row .pl-gear {
+    background:transparent; color:#666; padding:0 4px; font-weight:normal; font-size:14px;
+  }
+  .pl-row .pl-gear:hover { color:#000; background:transparent; }
+  #diagPanel { font-size:10px; max-height:160px; overflow-y:auto; }
+  #diagPanel .diag-row {
+    display:flex; justify-content:space-between; padding:2px 4px; border-bottom:1px solid #eee;
+  }
+  #diagPanel .diag-warn { color:#856404; background:#fff3cd; padding:3px 5px; margin:2px 0; border-radius:2px; }
+  #diagPanel .diag-err  { color:#721c24; background:#f8d7da; padding:3px 5px; margin:2px 0; border-radius:2px; }
+
+  /* Operator config modal */
+  #opModal {
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,0.5); z-index:1000; display:none;
+    align-items:center; justify-content:center;
+  }
+  #opModal .modal-card {
+    background:#fff; border-radius:8px; padding:18px 22px; min-width:340px; max-width:520px;
+    box-shadow:0 8px 30px rgba(0,0,0,0.4); color:#222;
+  }
+  #opModal h4 { margin:0 0 6px 0; }
+  #opModal .desc { font-size:11px; color:#666; margin-bottom:12px; }
+  #opModal .field { margin-bottom:8px; display:flex; flex-direction:column; gap:2px; }
+  #opModal .field label { font-size:11px; font-weight:bold; }
+  #opModal .field .help  { font-size:10px; color:#888; }
+  #opModal .modal-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
+
+  /* Preview banner */
+  #previewBanner {
+    display:none; background:#cce5ff; color:#004085; border:1px solid #80bdff;
+    border-radius:4px; padding:5px 8px; font-size:10px; text-align:center;
+  }
+  /* Drag-reorder highlight */
+  .pl-row.drag-over {
+    background: rgba(0,123,255,0.12);
+    outline: 1px dashed #007bff;
+  }
+  .pl-row[draggable=true] { cursor: grab; }
+  .pl-row[draggable=true]:active { cursor: grabbing; }
+  /* Preset row */
+  #presetRow { display:flex; gap:4px; margin-top:3px; }
+  #presetRow button { flex:1; font-size:10px; padding:3px 2px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "urdf-loader": "https://unpkg.com/urdf-loader@0.12.1/src/URDFLoader.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<!-- LEFT: Load + channels -->
+<div id="sidebar">
+  <h3 style="margin:0; text-align:center;">Motion Editor v3</h3>
+
+  <input type="text" id="urdfName" value="M2v6/urdf/Motion2_v2-2.urdf"
+         placeholder="urdf path under static/">
+  <button id="loadUrdfBtn">1. Load URDF</button>
+
+  <input type="file" id="npzInput" accept=".npz">
+  <small id="statusMsg" style="color:#666;">No motion</small>
+
+  <!-- Auto-extract notice (hidden by default) -->
+  <div id="autoExtractBanner" style="display:none; background:#fff3cd; color:#856404;
+       border:1px solid #ffc107; border-radius:4px; padding:5px 8px; font-size:10px;">
+    ⚡ Auto-extracted: <span id="autoExtractList"></span>
+  </div>
+
+  <!-- ── Channels (moved to top so it's always visible) ── -->
+  <div class="section-label">Channels</div>
+  <div id="jointListContainer"></div>
+  <button id="smoothAllBtn" class="warning" style="margin-top:2px;">
+    Smooth Current Curve (all frames)
+  </button>
+
+  <!-- ── Improvement Pipeline ── -->
+  <div class="section-label">Improvement Pipeline</div>
+  <div id="previewBanner">⚡ Showing PREVIEW — click Apply to commit, Reset to discard</div>
+  <div id="pipelineList"></div>
+  <div class="row" style="display:flex; gap:4px;">
+    <button id="pipelinePreviewBtn" class="warning" style="flex:1;">Preview</button>
+    <button id="pipelineApplyBtn" class="success" style="flex:1;">Apply</button>
+    <button id="pipelineResetBtn" class="sec" style="flex:1;">Reset</button>
+  </div>
+  <div id="presetRow">
+    <button id="savePresetBtn" class="sec" title="Save current pipeline config to localStorage">💾 Save</button>
+    <button id="loadPresetBtn" class="sec" title="Load pipeline config from localStorage">📂 Load</button>
+    <button id="exportPresetBtn" class="sec" title="Export pipeline config as JSON">↓ JSON</button>
+    <label id="importPresetLbl" class="sec" title="Import pipeline config from JSON file"
+           style="flex:1; text-align:center; cursor:pointer; padding:3px 2px; font-size:10px;">
+      ↑ Import<input id="importPresetInput" type="file" accept=".json" style="display:none">
+    </label>
+  </div>
+  <details style="margin-top:4px;">
+    <summary style="font-size:10px; cursor:pointer; color:#666;">Diagnostics</summary>
+    <div id="diagPanel">No diagnostics yet — run Preview.</div>
+  </details>
+
+  <button id="saveBtn" class="success" style="margin-top:4px;">
+    Download NPZ
+  </button>
+
+  <!-- ── Trim Frames (collapsible) ── -->
+  <details id="trimDetails">
+    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
+      <span style="flex:1;">✂ Trim Frames</span><span style="font-weight:normal; font-size:10px; color:#999;">▼</span>
+    </summary>
+    <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+      <div class="row">
+        <input type="number" id="trimStart" value="0" min="0"
+               style="width:55px; flex:none;" title="Start frame">
+        <button id="setTrimStartBtn" class="sec" style="font-size:10px;">◀ Start</button>
+        <button id="trimFromRangeBtn" class="sec" style="font-size:10px;" title="Set trim from range selection">⇥ Range</button>
+      </div>
+      <div class="row">
+        <input type="number" id="trimEnd" value="0" min="0"
+               style="width:55px; flex:none;" title="End frame">
+        <button id="setTrimEndBtn" class="sec" style="font-size:10px;">End ▶</button>
+        <button id="resetTrimBtn" class="sec" style="font-size:10px;">Reset</button>
+      </div>
+      <small id="trimInfo" style="color:#666;">—</small>
+      <div class="row">
+        <button id="applyTrimBtn" class="danger" title="Trim in memory (irreversible)">Apply Trim</button>
+        <button id="exportTrimBtn" class="success" title="Download trimmed NPZ without changing editor">Export</button>
+      </div>
+    </div>
+  </details>
+
+  <!-- ── Floor check (collapsible) ── -->
+  <details id="floorDetails">
+    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
+      <span style="flex:1;">⚡ Floor Check (FK)</span><span style="font-weight:normal; font-size:10px; color:#999;">▼</span>
+    </summary>
+    <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+      <input type="text" id="xmlPath" value="static/M2v6/M2v6.xml"
+             placeholder="MuJoCo XML for FK">
+      <button id="checkFloorBtn" class="warning">Check Floor Contact</button>
+      <small id="floorStatus" style="color:#666;">not checked</small>
+    </div>
+  </details>
+
+  <div style="font-size:10px; color:#666; margin-top:4px;">
+    <b>Keys:</b> ←/→ step frame | ↑/↓ nudge value | Shift+drag = range
+    | Ctrl+Z undo | Ctrl+Y redo
+  </div>
+</div>
+
+<!-- Operator config modal -->
+<div id="opModal">
+  <div class="modal-card">
+    <h4 id="opModalTitle">Operator</h4>
+    <div class="desc" id="opModalDesc"></div>
+    <div id="opModalFields"></div>
+    <div class="modal-buttons">
+      <button id="opModalReset" class="sec">Reset Defaults</button>
+      <button id="opModalCancel" class="sec">Cancel</button>
+      <button id="opModalSave" class="success">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT: Control panel -->
+<div id="ctrlPanel">
+  <div style="font-weight:bold; font-size:13px;">
+    <span id="cpChannel">—</span>
+  </div>
+  <div class="small">frame <b id="cpFrame">0</b></div>
+
+  <div class="vbox">
+    <div class="small">Value</div>
+    <input type="number" id="cpValue" step="0.01">
+  </div>
+
+  <div class="vbox">
+    <div class="small">Adjust</div>
+    <div class="row">
+      <button class="sec" data-nudge="-0.1">−0.1</button>
+      <button class="sec" data-nudge="-0.01">−0.01</button>
+      <button class="sec" data-nudge="-0.001">−0.001</button>
+    </div>
+    <div class="row">
+      <button class="sec" data-nudge="0.001">+0.001</button>
+      <button class="sec" data-nudge="0.01">+0.01</button>
+      <button class="sec" data-nudge="0.1">+0.1</button>
+    </div>
+  </div>
+
+  <div class="section-label">Keyframes</div>
+  <div class="row">
+    <button id="setK1">Set K1: <span id="k1Frame">—</span></button>
+    <button id="setK2">Set K2: <span id="k2Frame">—</span></button>
+  </div>
+  <button id="interpKeyframes" class="warning">Interpolate K1 → K2 (linear)</button>
+  <button id="clearKeyframes" class="sec">Clear keyframes</button>
+
+  <div class="section-label">Copy value</div>
+  <div class="row">
+    <button id="copyValBtn" class="sec">Copy</button>
+    <button id="pasteValBtn" class="sec">Paste</button>
+  </div>
+  <div class="small">Clipboard: <b id="clipVal">—</b></div>
+</div>
+
+<!-- Bottom editor -->
+<div id="curveEditor">
+  <div id="editorControls">
+    <div class="control-box">
+      <span style="color:#007bff; font-weight:bold;" id="activeJointName">None</span>
+    </div>
+    <div class="control-box">
+      frame <span id="frameDisplay">0</span> · val <span id="valDisplay">0.00</span>
+    </div>
+  </div>
+  <div id="rangeToolbar">
+    <span><b>Range:</b> <span id="rangeInfo">—</span></span>
+    <button id="rangeSmooth">Smooth</button>
+    <button id="rangeInterp">Interp 2-end</button>
+    <button id="rangeOffsetMinus">−0.05</button>
+    <button id="rangeOffsetPlus">+0.05</button>
+    <button id="rangeClear" class="sec">Clear</button>
+  </div>
+  <div id="timelineWrapper">
+    <span>Frame</span>
+    <input type="range" id="timelineSlider" min="0" max="100" value="0">
+    <span id="timelineFrameNum">0</span>
+  </div>
+  <canvas id="nativeCurveCanvas"></canvas>
+</div>
+
+<div id="statusBar">ready</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import URDFLoader from 'urdf-loader';
+
+// =========================================================
+//  State
+// =========================================================
+let motionData = null;
+let currentFrame = 0;
+let activeIndex = -1;      // index within active channel category
+let activeType = 'joint';  // 'joint' | 'pos' | 'rot'
+let activeLabel = '';
+
+let rangeA = -1;           // Shift+drag range start
+let rangeB = -1;
+let keyframes = { K1: -1, K2: -1 };
+let clipboardVal = null;
+
+let floorData = null;      // { hand_min_z: [...], geoms: {...} }
+
+// Trim state
+let trimS = -1;            // -1 = not set
+let trimE = -1;
+
+// Undo/Redo
+const UNDO_LIMIT = 30;
+const undoStack = [];
+const redoStack = [];
+function _clone2D(a) {
+  return Array.isArray(a) ? a.map(r => Array.isArray(r) ? r.slice() : r) : a;
+}
+function _clone3D(a) {
+  return Array.isArray(a)
+    ? a.map(r => Array.isArray(r) ? r.map(s => Array.isArray(s) ? s.slice() : s) : r)
+    : a;
+}
+function snapshot() {
+  if (!motionData) return null;
+  const m = motionData;
+  return {
+    joint_pos:      _clone2D(m.joint_pos),
+    base_pos_w:     _clone2D(m.base_pos_w),
+    base_quat_w:    _clone2D(m.base_quat_w),
+    joint_vel:      _clone2D(m.joint_vel),
+    body_pos_w:     _clone3D(m.body_pos_w),
+    body_quat_w:    _clone3D(m.body_quat_w),
+    body_lin_vel_w: _clone3D(m.body_lin_vel_w),
+    body_ang_vel_w: _clone3D(m.body_ang_vel_w),
+    num_frames:     m.num_frames,
+  };
+}
+function pushUndo() {
+  const s = snapshot();
+  if (s) {
+    undoStack.push(s);
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    redoStack.length = 0;
+  }
+}
+function applySnapshot(s) {
+  motionData.joint_pos      = _clone2D(s.joint_pos);
+  motionData.base_pos_w     = _clone2D(s.base_pos_w);
+  motionData.base_quat_w    = _clone2D(s.base_quat_w);
+  if (s.joint_vel)      motionData.joint_vel      = _clone2D(s.joint_vel);
+  if (s.body_pos_w)     motionData.body_pos_w     = _clone3D(s.body_pos_w);
+  if (s.body_quat_w)    motionData.body_quat_w    = _clone3D(s.body_quat_w);
+  if (s.body_lin_vel_w) motionData.body_lin_vel_w = _clone3D(s.body_lin_vel_w);
+  if (s.body_ang_vel_w) motionData.body_ang_vel_w = _clone3D(s.body_ang_vel_w);
+  if (s.num_frames !== undefined) motionData.num_frames = s.num_frames;
+  drawCurve(); update3DRobot(currentFrame); syncCtrlPanel();
+}
+function undo() {
+  if (!undoStack.length) return flash('nothing to undo');
+  redoStack.push(snapshot());
+  applySnapshot(undoStack.pop());
+  flash('undone');
+}
+function redo() {
+  if (!redoStack.length) return flash('nothing to redo');
+  undoStack.push(snapshot());
+  applySnapshot(redoStack.pop());
+  flash('redone');
+}
+
+// =========================================================
+//  Channel API
+// =========================================================
+function getChannelValue(f) {
+  if (!motionData) return 0;
+  if (f < 0 || f >= motionData.num_frames) return 0;
+  if (activeType === 'joint') return motionData.joint_pos[f][activeIndex];
+  if (activeType === 'pos') return motionData.base_pos_w[f][activeIndex];
+  if (activeType === 'rot') {
+    const q = motionData.base_quat_w[f];
+    const qq = new THREE.Quaternion(q[1], q[2], q[3], q[0]);
+    const e = new THREE.Euler().setFromQuaternion(qq, 'XYZ');
+    return [e.x, e.y, e.z][activeIndex];
+  }
+  return 0;
+}
+function setChannelValue(f, val) {
+  if (!motionData) return;
+  if (activeType === 'joint') motionData.joint_pos[f][activeIndex] = val;
+  else if (activeType === 'pos') motionData.base_pos_w[f][activeIndex] = val;
+  else if (activeType === 'rot') {
+    const q = motionData.base_quat_w[f];
+    const qq = new THREE.Quaternion(q[1], q[2], q[3], q[0]);
+    const e = new THREE.Euler().setFromQuaternion(qq, 'XYZ');
+    if (activeIndex === 0) e.x = val;
+    if (activeIndex === 1) e.y = val;
+    if (activeIndex === 2) e.z = val;
+    qq.setFromEuler(e);
+    motionData.base_quat_w[f] = [qq.w, qq.x, qq.y, qq.z];
+  }
+}
+
+// Extract active channel values from a snapshot (for A/B overlay).
+function _getChannelValuesFrom(src) {
+  if (!src) return null;
+  const count = src.num_frames || (src.joint_pos ? src.joint_pos.length : 0);
+  if (!count) return null;
+  const vals = new Array(count);
+  for (let i = 0; i < count; i++) {
+    if (activeType === 'joint' && src.joint_pos) {
+      vals[i] = (src.joint_pos[i] && src.joint_pos[i][activeIndex] !== undefined)
+        ? src.joint_pos[i][activeIndex] : 0;
+    } else if (activeType === 'pos' && src.base_pos_w) {
+      vals[i] = (src.base_pos_w[i] && src.base_pos_w[i][activeIndex] !== undefined)
+        ? src.base_pos_w[i][activeIndex] : 0;
+    } else if (activeType === 'rot' && src.base_quat_w && src.base_quat_w[i]) {
+      const q = src.base_quat_w[i];
+      const qq = new THREE.Quaternion(q[1], q[2], q[3], q[0]);
+      const e = new THREE.Euler().setFromQuaternion(qq, 'XYZ');
+      vals[i] = [e.x, e.y, e.z][activeIndex];
+    } else {
+      vals[i] = 0;
+    }
+  }
+  return { vals, count };
+}
+
+// =========================================================
+//  Canvas drawing
+// =========================================================
+const canvas = document.getElementById('nativeCurveCanvas');
+const ctx = canvas.getContext('2d');
+let editorW, editorH;
+const PAD = { top: 50, bottom: 50, left: 10, right: 10 };
+
+function resizeEditor() {
+  const parent = document.getElementById('curveEditor');
+  if (parent.style.display === 'none') return;
+  editorW = parent.clientWidth;
+  editorH = parent.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = editorW * dpr;
+  canvas.height = editorH * dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  canvas.style.width = editorW + 'px';
+  canvas.style.height = editorH + 'px';
+  drawCurve();
+}
+window.addEventListener('resize', resizeEditor);
+
+function drawCurve() {
+  if (!motionData || activeIndex === -1) return;
+  ctx.clearRect(0, 0, editorW, editorH);
+
+  const count = motionData.num_frames;
+  const vals = new Array(count);
+  for (let i = 0; i < count; i++) vals[i] = getChannelValue(i);
+
+  let minVal = -3.15, maxVal = 3.15;
+  if (activeType === 'pos') { minVal = -1.0; maxVal = 1.0; }
+  for (const v of vals) { if (v < minVal) minVal = v - 0.1; if (v > maxVal) maxVal = v + 0.1; }
+
+  const valRange = maxVal - minVal;
+  const drawH = editorH - PAD.top - PAD.bottom;
+  const drawW = editorW - PAD.left - PAD.right;
+  const stepX = drawW / Math.max(1, count - 1);
+  const getX = (i) => PAD.left + i * stepX;
+  const getY = (v) => PAD.top + drawH - ((v - minVal) / valRange * drawH);
+
+  // Diagnostics tick overlays — vel violations (red) and foot-slip (orange)
+  if (lastDiagnostics && lastDiagnostics.after && lastDiagnostics.after.global) {
+    const ag = lastDiagnostics.after.global;
+    const tickH = 6;
+    if (Array.isArray(ag.vel_violation_frames) && ag.vel_violation_frames.length) {
+      ctx.fillStyle = 'rgba(220,40,40,0.85)';
+      for (const f of ag.vel_violation_frames) {
+        if (f >= 0 && f < count) {
+          ctx.fillRect(getX(f) - 1, editorH - PAD.bottom - tickH, 2, tickH);
+        }
+      }
+    }
+    if (Array.isArray(ag.foot_slip_frames) && ag.foot_slip_frames.length) {
+      ctx.fillStyle = 'rgba(255,140,0,0.85)';
+      for (const f of ag.foot_slip_frames) {
+        if (f >= 0 && f < count) {
+          ctx.fillRect(getX(f) - 1, editorH - PAD.bottom - tickH * 2 - 1, 2, tickH);
+        }
+      }
+    }
+  }
+
+  // Floor-contact background (red bars under frames with hand below floor)
+  if (floorData && floorData.hand_min_z && activeType === 'joint') {
+    const hmz = floorData.hand_min_z;
+    ctx.fillStyle = 'rgba(220,50,50,0.15)';
+    for (let i = 0; i < count; i++) {
+      if (hmz[i] !== undefined && hmz[i] < 0) {
+        const x = getX(i) - stepX / 2;
+        ctx.fillRect(x, PAD.top, stepX, drawH);
+      }
+    }
+  }
+
+  // Range selection band
+  if (rangeA >= 0 && rangeB >= 0) {
+    const a = Math.min(rangeA, rangeB), b = Math.max(rangeA, rangeB);
+    ctx.fillStyle = 'rgba(0,123,255,0.18)';
+    ctx.fillRect(getX(a) - stepX / 2, PAD.top, (b - a + 1) * stepX, drawH);
+  }
+
+  // Trim region shading
+  if (trimS >= 0 || trimE >= 0) {
+    const s = trimS >= 0 ? trimS : 0;
+    const e = trimE >= 0 ? trimE : count - 1;
+    // Dim outside trim region
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    if (s > 0) ctx.fillRect(PAD.left, PAD.top, (s / (count - 1)) * drawW, drawH);
+    if (e < count - 1) ctx.fillRect(getX(e), PAD.top, (count - 1 - e) * stepX + stepX, drawH);
+    // Trim start marker (green)
+    if (trimS >= 0) {
+      const x = getX(trimS);
+      ctx.beginPath(); ctx.strokeStyle = '#20c997'; ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.moveTo(x, PAD.top - 8); ctx.lineTo(x, editorH - PAD.bottom + 4);
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#20c997'; ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('TS', x + 2, PAD.top - 10);
+    }
+    // Trim end marker (orange-red)
+    if (trimE >= 0) {
+      const x = getX(trimE);
+      ctx.beginPath(); ctx.strokeStyle = '#e83e8c'; ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.moveTo(x, PAD.top - 8); ctx.lineTo(x, editorH - PAD.bottom + 4);
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#e83e8c'; ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('TE', x - 18, PAD.top - 10);
+    }
+  }
+
+  // Keyframe markers
+  for (const [name, f] of Object.entries(keyframes)) {
+    if (f < 0) continue;
+    const x = getX(f);
+    ctx.beginPath();
+    ctx.strokeStyle = name === 'K1' ? '#28a745' : '#fd7e14';
+    ctx.lineWidth = 2;
+    ctx.moveTo(x, PAD.top - 8); ctx.lineTo(x, editorH - PAD.bottom + 4);
+    ctx.stroke();
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText(name, x - 7, PAD.top - 10);
+  }
+
+  // Zero line
+  const yZero = getY(0);
+  if (yZero > PAD.top && yZero < editorH - PAD.bottom) {
+    ctx.strokeStyle = '#ddd'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, yZero); ctx.lineTo(editorW - PAD.right, yZero); ctx.stroke();
+  }
+
+  // Joint position-limit lines (dashed) for active joint channel
+  if (activeType === 'joint' && robotLimits && robotLimits.joints && motionData.joint_names) {
+    const jname = motionData.joint_names[activeIndex];
+    const lim = jname ? robotLimits.joints[jname] : null;
+    if (lim && lim.limited) {
+      const drawLine = (yVal, color, label) => {
+        const y = getY(yVal);
+        if (y < PAD.top || y > editorH - PAD.bottom) return;
+        ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(PAD.left, y); ctx.lineTo(editorW - PAD.right, y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = color;
+        ctx.font = '9px monospace';
+        ctx.fillText(label, editorW - PAD.right - 50, y - 2);
+      };
+      drawLine(lim.pos_min, 'rgba(220,50,50,0.55)', `lo ${lim.pos_min.toFixed(2)}`);
+      drawLine(lim.pos_max, 'rgba(220,50,50,0.55)', `hi ${lim.pos_max.toFixed(2)}`);
+      // Soft-limit (clamp targets) lines lighter
+      const soft = robotLimits.soft_factor ?? 0.9;
+      const half = 0.5 * (1.0 - soft) * (lim.pos_max - lim.pos_min);
+      drawLine(lim.pos_min + half, 'rgba(220,150,50,0.4)', '');
+      drawLine(lim.pos_max - half, 'rgba(220,150,50,0.4)', '');
+    }
+  }
+
+  // A/B compare: draw original (previewBackup) as a gray dashed line behind the preview
+  if (previewBackup) {
+    const orig = _getChannelValuesFrom(previewBackup);
+    if (orig && orig.count > 1) {
+      // Map original frame indices onto same x-axis (may have different frame count)
+      const origStep = drawW / Math.max(1, orig.count - 1);
+      const getOrigX = (i) => PAD.left + i * origStep;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(150,150,150,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(getOrigX(0), getY(orig.vals[0]));
+      for (let i = 1; i < orig.count; i++) ctx.lineTo(getOrigX(i), getY(orig.vals[i]));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      // Label
+      ctx.fillStyle = 'rgba(120,120,120,0.7)';
+      ctx.font = '9px monospace';
+      ctx.fillText('orig', PAD.left + 2, PAD.top + 10);
+    }
+  }
+
+  // Curve
+  ctx.strokeStyle = '#007bff'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(getX(0), getY(vals[0]));
+  for (let i = 1; i < count; i++) ctx.lineTo(getX(i), getY(vals[i]));
+  ctx.stroke();
+
+  // Current-frame marker (red vertical)
+  const xCur = getX(currentFrame);
+  ctx.strokeStyle = 'rgba(220,50,50,0.7)';
+  ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(xCur, PAD.top); ctx.lineTo(xCur, editorH - PAD.bottom);
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // Points
+  for (let i = 0; i < count; i++) {
+    ctx.beginPath();
+    const cx = getX(i), cy = getY(vals[i]);
+    if (i === currentFrame) {
+      ctx.fillStyle = '#dc3545'; ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    } else {
+      ctx.fillStyle = '#007bff'; ctx.arc(cx, cy, 2.0, 0, Math.PI * 2);
+    }
+    ctx.fill();
+  }
+
+  // Y-axis tick labels (min/max/0)
+  ctx.fillStyle = '#999'; ctx.font = '10px monospace';
+  ctx.fillText(maxVal.toFixed(2), 2, PAD.top + 10);
+  ctx.fillText(minVal.toFixed(2), 2, editorH - PAD.bottom - 2);
+  if (yZero > PAD.top && yZero < editorH - PAD.bottom) {
+    ctx.fillText('0', 2, yZero - 2);
+  }
+
+  canvas.scaleInfo = { minVal, valRange, drawH, stepX, getX, getY, count };
+}
+
+// =========================================================
+//  Canvas mouse interaction (edit + range selection)
+// =========================================================
+let dragMode = null; // 'edit' | 'range'
+
+function pxToFrame(x) {
+  const info = canvas.scaleInfo; if (!info) return -1;
+  const i = Math.round((x - PAD.left) / info.stepX);
+  return Math.max(0, Math.min(info.count - 1, i));
+}
+function getMouse(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  if (!motionData) return;
+  const m = getMouse(e);
+  const info = canvas.scaleInfo; if (!info) return;
+  const f = pxToFrame(m.x);
+  if (e.shiftKey) {
+    dragMode = 'range';
+    pushUndo();  // (selection doesn't edit, but safer if followed by op)
+    rangeA = f; rangeB = f;
+    showRangeToolbar();
+  } else {
+    dragMode = 'edit';
+    pushUndo();
+    update3DRobot(f);
+    const v = ((PAD.top + info.drawH - m.y) / info.drawH) * info.valRange + info.minVal;
+    setChannelValue(f, v);
+  }
+  drawCurve(); syncCtrlPanel();
+});
+canvas.addEventListener('mousemove', (e) => {
+  if (!motionData || !dragMode) return;
+  const m = getMouse(e);
+  const info = canvas.scaleInfo; if (!info) return;
+  const f = pxToFrame(m.x);
+  if (dragMode === 'range') {
+    rangeB = f;
+    updateRangeToolbar();
+    drawCurve();
+  } else {
+    const v = ((PAD.top + info.drawH - m.y) / info.drawH) * info.valRange + info.minVal;
+    setChannelValue(f, v);
+    update3DRobot(f);
+    drawCurve(); syncCtrlPanel();
+  }
+});
+canvas.addEventListener('mouseup', () => { dragMode = null; });
+canvas.addEventListener('mouseleave', () => { dragMode = null; });
+
+function showRangeToolbar() { document.getElementById('rangeToolbar').style.display = 'flex'; }
+function hideRangeToolbar() { document.getElementById('rangeToolbar').style.display = 'none'; }
+function updateRangeToolbar() {
+  if (rangeA < 0 || rangeB < 0) { hideRangeToolbar(); return; }
+  const a = Math.min(rangeA, rangeB), b = Math.max(rangeA, rangeB);
+  document.getElementById('rangeInfo').innerText = `${a}–${b} (${b - a + 1} frames)`;
+}
+
+// =========================================================
+//  Range operations
+// =========================================================
+function forEachInRange(fn) {
+  if (rangeA < 0 || rangeB < 0) return flash('no range selected');
+  pushUndo();
+  const a = Math.min(rangeA, rangeB), b = Math.max(rangeA, rangeB);
+  for (let i = a; i <= b; i++) fn(i, a, b);
+  drawCurve(); update3DRobot(currentFrame); syncCtrlPanel();
+}
+document.getElementById('rangeSmooth').onclick = () => {
+  if (rangeA < 0 || rangeB < 0) return flash('no range');
+  pushUndo();
+  const a = Math.min(rangeA, rangeB), b = Math.max(rangeA, rangeB);
+  const raw = [];
+  for (let i = a; i <= b; i++) raw.push(getChannelValue(i));
+  const smoothed = raw.map((_, i) => {
+    let s = 0, c = 0;
+    for (let j = i - 2; j <= i + 2; j++) if (j >= 0 && j < raw.length) { s += raw[j]; c++; }
+    return s / c;
+  });
+  for (let i = a; i <= b; i++) setChannelValue(i, smoothed[i - a]);
+  drawCurve(); update3DRobot(currentFrame); syncCtrlPanel();
+  flash(`smoothed ${b - a + 1} frames`);
+};
+document.getElementById('rangeInterp').onclick = () => {
+  if (rangeA < 0 || rangeB < 0) return flash('no range');
+  pushUndo();
+  const a = Math.min(rangeA, rangeB), b = Math.max(rangeA, rangeB);
+  const va = getChannelValue(a), vb = getChannelValue(b);
+  const span = b - a;
+  for (let i = a; i <= b; i++) {
+    const t = span > 0 ? (i - a) / span : 0;
+    setChannelValue(i, va + (vb - va) * t);
+  }
+  drawCurve(); update3DRobot(currentFrame); syncCtrlPanel();
+  flash('interpolated endpoints');
+};
+document.getElementById('rangeOffsetMinus').onclick = () => forEachInRange((i) => setChannelValue(i, getChannelValue(i) - 0.05));
+document.getElementById('rangeOffsetPlus').onclick = () => forEachInRange((i) => setChannelValue(i, getChannelValue(i) + 0.05));
+document.getElementById('rangeClear').onclick = () => { rangeA = -1; rangeB = -1; hideRangeToolbar(); drawCurve(); };
+
+// =========================================================
+//  Keyframe interpolation
+// =========================================================
+document.getElementById('setK1').onclick = () => {
+  keyframes.K1 = currentFrame;
+  document.getElementById('k1Frame').innerText = currentFrame;
+  drawCurve();
+};
+document.getElementById('setK2').onclick = () => {
+  keyframes.K2 = currentFrame;
+  document.getElementById('k2Frame').innerText = currentFrame;
+  drawCurve();
+};
+document.getElementById('clearKeyframes').onclick = () => {
+  keyframes.K1 = -1; keyframes.K2 = -1;
+  document.getElementById('k1Frame').innerText = '—';
+  document.getElementById('k2Frame').innerText = '—';
+  drawCurve();
+};
+document.getElementById('interpKeyframes').onclick = () => {
+  if (keyframes.K1 < 0 || keyframes.K2 < 0) return flash('set both K1 and K2');
+  pushUndo();
+  const a = Math.min(keyframes.K1, keyframes.K2);
+  const b = Math.max(keyframes.K1, keyframes.K2);
+  const va = getChannelValue(a), vb = getChannelValue(b);
+  const span = b - a;
+  for (let i = a; i <= b; i++) {
+    const t = span > 0 ? (i - a) / span : 0;
+    setChannelValue(i, va + (vb - va) * t);
+  }
+  drawCurve(); update3DRobot(currentFrame); syncCtrlPanel();
+  flash(`K1→K2 interpolated (${b - a + 1} frames)`);
+};
+
+// =========================================================
+//  Copy / paste value
+// =========================================================
+document.getElementById('copyValBtn').onclick = () => {
+  if (!motionData) return;
+  clipboardVal = getChannelValue(currentFrame);
+  document.getElementById('clipVal').innerText = clipboardVal.toFixed(4);
+};
+document.getElementById('pasteValBtn').onclick = () => {
+  if (clipboardVal === null) return flash('nothing in clipboard');
+  pushUndo();
+  // Paste into either the current frame, or the selected range if any
+  if (rangeA >= 0 && rangeB >= 0) {
+    const a = Math.min(rangeA, rangeB), b = Math.max(rangeA, rangeB);
+    for (let i = a; i <= b; i++) setChannelValue(i, clipboardVal);
+    flash(`pasted into ${b - a + 1} frames`);
+  } else {
+    setChannelValue(currentFrame, clipboardVal);
+    flash('pasted');
+  }
+  drawCurve(); update3DRobot(currentFrame); syncCtrlPanel();
+};
+
+// =========================================================
+//  Control panel input + nudge
+// =========================================================
+function syncCtrlPanel() {
+  if (!motionData || activeIndex < 0) return;
+  document.getElementById('cpChannel').innerText = activeLabel;
+  document.getElementById('cpFrame').innerText = currentFrame;
+  const v = getChannelValue(currentFrame);
+  const el = document.getElementById('cpValue');
+  if (document.activeElement !== el) el.value = v.toFixed(4);
+  document.getElementById('valDisplay').innerText = v.toFixed(3);
+}
+document.getElementById('cpValue').addEventListener('change', (e) => {
+  if (!motionData) return;
+  pushUndo();
+  const v = parseFloat(e.target.value);
+  if (!Number.isFinite(v)) return;
+  setChannelValue(currentFrame, v);
+  drawCurve(); update3DRobot(currentFrame);
+});
+document.querySelectorAll('[data-nudge]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!motionData || activeIndex < 0) return;
+    pushUndo();
+    const step = parseFloat(btn.getAttribute('data-nudge'));
+    setChannelValue(currentFrame, getChannelValue(currentFrame) + step);
+    drawCurve(); update3DRobot(currentFrame); syncCtrlPanel();
+  });
+});
+
+// =========================================================
+//  Smooth entire current curve (v1 behavior)
+// =========================================================
+document.getElementById('smoothAllBtn').onclick = () => {
+  if (!motionData || activeIndex < 0) return flash('no channel selected');
+  pushUndo();
+  const count = motionData.num_frames;
+  const raw = new Array(count);
+  for (let i = 0; i < count; i++) raw[i] = getChannelValue(i);
+  const smoothed = new Array(count);
+  for (let i = 0; i < count; i++) {
+    let s = 0, c = 0;
+    for (let j = i - 2; j <= i + 2; j++) if (j >= 0 && j < count) { s += raw[j]; c++; }
+    smoothed[i] = s / c;
+  }
+  for (let i = 0; i < count; i++) setChannelValue(i, smoothed[i]);
+  drawCurve(); update3DRobot(currentFrame); syncCtrlPanel();
+  flash(`smoothed all ${count} frames`);
+};
+
+// =========================================================
+//  Trim helpers
+// =========================================================
+function updateTrimUI() {
+  if (!motionData) { document.getElementById('trimInfo').innerText = '—'; return; }
+  const T = motionData.num_frames;
+  const s = trimS >= 0 ? trimS : 0;
+  const e = trimE >= 0 ? trimE : T - 1;
+  document.getElementById('trimStart').value = s;
+  document.getElementById('trimEnd').value = e;
+  const count = e - s + 1;
+  const ok = count > 0 && s <= e;
+  const el = document.getElementById('trimInfo');
+  if (!ok) { el.style.color = '#c00'; el.innerText = 'invalid range'; }
+  else { el.style.color = '#666'; el.innerText = `${s} → ${e}  (${count} frames)`; }
+  drawCurve();
+}
+
+function _getTrimRange() {
+  const T = motionData ? motionData.num_frames : 0;
+  const s = Math.max(0, parseInt(document.getElementById('trimStart').value) || 0);
+  const eRaw = parseInt(document.getElementById('trimEnd').value);
+  const e = (!Number.isFinite(eRaw) || eRaw < 0) ? T - 1 : Math.min(eRaw, T - 1);
+  return { s, e, ok: s <= e && e - s + 1 > 0 };
+}
+
+function _sliceMotionData(md, s, e) {
+  // Returns a NEW object with all arrays sliced [s..e] inclusive
+  const sl = f => (Array.isArray(f) && f.length) ? f.slice(s, e + 1) : f;
+  return {
+    ...md,
+    joint_pos:      md.joint_pos.slice(s, e + 1),
+    joint_vel:      sl(md.joint_vel),
+    base_pos_w:     md.base_pos_w.slice(s, e + 1),
+    base_quat_w:    md.base_quat_w.slice(s, e + 1),
+    body_pos_w:     sl(md.body_pos_w),
+    body_quat_w:    sl(md.body_quat_w),
+    body_lin_vel_w: sl(md.body_lin_vel_w),
+    body_ang_vel_w: sl(md.body_ang_vel_w),
+    num_frames:     e - s + 1,
+  };
+}
+
+document.getElementById('trimStart').addEventListener('input', () => {
+  trimS = parseInt(document.getElementById('trimStart').value);
+  updateTrimUI();
+});
+document.getElementById('trimEnd').addEventListener('input', () => {
+  trimE = parseInt(document.getElementById('trimEnd').value);
+  updateTrimUI();
+});
+document.getElementById('setTrimStartBtn').onclick = () => {
+  trimS = currentFrame;
+  if (trimE < 0 && motionData) trimE = motionData.num_frames - 1;
+  updateTrimUI(); flash(`Trim start: ${trimS}`);
+};
+document.getElementById('setTrimEndBtn').onclick = () => {
+  trimE = currentFrame;
+  if (trimS < 0) trimS = 0;
+  updateTrimUI(); flash(`Trim end: ${trimE}`);
+};
+document.getElementById('trimFromRangeBtn').onclick = () => {
+  if (rangeA < 0 || rangeB < 0) return flash('no range selected (Shift+drag on curve)');
+  trimS = Math.min(rangeA, rangeB);
+  trimE = Math.max(rangeA, rangeB);
+  updateTrimUI(); flash(`Trim from range: ${trimS}–${trimE}`);
+};
+document.getElementById('resetTrimBtn').onclick = () => {
+  trimS = -1; trimE = -1;
+  if (motionData) {
+    document.getElementById('trimStart').value = 0;
+    document.getElementById('trimEnd').value = motionData.num_frames - 1;
+  }
+  document.getElementById('trimInfo').innerText = '—';
+  drawCurve(); flash('trim reset');
+};
+
+document.getElementById('applyTrimBtn').onclick = () => {
+  if (!motionData) return flash('load motion first');
+  const { s, e, ok } = _getTrimRange();
+  if (!ok) return flash('invalid trim range');
+  const keep = e - s + 1;
+  if (keep === motionData.num_frames) return flash('nothing to trim');
+  if (!confirm(`Apply trim: keep frames ${s}–${e} (${keep} frames)?\nThis modifies the editor and cannot be undone.`)) return;
+  motionData = _sliceMotionData(motionData, s, e);
+  // Reset timeline
+  const slider = document.getElementById('timelineSlider');
+  slider.max = motionData.num_frames - 1;
+  document.getElementById('statusMsg').innerText = `${motionData.num_frames} frames @ ${motionData.fps} fps`;
+  undoStack.length = 0; redoStack.length = 0;
+  trimS = -1; trimE = -1;
+  updateTrimUI();
+  update3DRobot(0); drawCurve();
+  flash(`trimmed → ${motionData.num_frames} frames`);
+};
+
+document.getElementById('exportTrimBtn').onclick = async () => {
+  if (!motionData) return flash('load motion first');
+  const { s, e, ok } = _getTrimRange();
+  if (!ok) return flash('invalid trim range');
+  const btn = document.getElementById('exportTrimBtn');
+  btn.disabled = true; btn.innerText = 'exporting…';
+  try {
+    const sliced = _sliceMotionData(motionData, s, e);
+    const origName = (document.getElementById('npzInput').files[0]?.name || 'motion')
+      .replace(/\.npz$/i, '');
+    sliced._filename = `${origName}_trim${s}-${e}`;
+    const res = await fetch('/save_motion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sliced),
+    });
+    if (!res.ok) throw new Error('server error');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${origName}_trim${s}-${e}.npz`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    flash(`exported frames ${s}–${e}  (${e - s + 1} frames)`);
+  } catch (err) { flash('export failed: ' + err.message); }
+  finally { btn.disabled = false; btn.innerText = 'Export'; }
+};
+
+// =========================================================
+//  Floor contact check
+// =========================================================
+document.getElementById('checkFloorBtn').onclick = async () => {
+  if (!motionData) return flash('load motion first');
+  const btn = document.getElementById('checkFloorBtn');
+  btn.disabled = true; btn.innerText = 'Checking…';
+  try {
+    const res = await fetch('/check_floor_contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        xml_path: document.getElementById('xmlPath').value,
+        joint_names: motionData.joint_names,
+        joint_pos: motionData.joint_pos,
+        base_pos_w: motionData.base_pos_w,
+        base_quat_w: motionData.base_quat_w,
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    floorData = data;
+    const bad = data.hand_min_z.filter(z => z < 0).length;
+    const mn = Math.min(...data.hand_min_z);
+    document.getElementById('floorStatus').innerText =
+      `${bad} frames below floor · min hand z = ${mn.toFixed(3)} m`;
+    document.getElementById('floorStatus').style.color = bad ? '#c00' : '#080';
+    drawCurve();
+    flash(`floor check done: ${bad} bad frames`);
+  } catch (err) {
+    flash('floor check failed: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.innerText = 'Check Floor Contact';
+  }
+};
+
+// =========================================================
+//  3D scene
+// =========================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2d2d2d);
+scene.add(new THREE.GridHelper(50, 50).rotateX(Math.PI / 2));
+scene.add(new THREE.AxesHelper(1));
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 1000);
+camera.position.set(3, -3, 2);
+camera.up.set(0, 0, 1);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+scene.add(new THREE.DirectionalLight(0xffffff, 1.5).translateZ(10));
+scene.add(new THREE.AmbientLight(0x606060));
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+let robot = null;
+const jointsMap = {};
+
+function update3DRobot(f) {
+  currentFrame = Math.max(0, Math.min(motionData.num_frames - 1, f));
+  document.getElementById('frameDisplay').innerText = currentFrame;
+  document.getElementById('timelineFrameNum').innerText = currentFrame;
+  const slider = document.getElementById('timelineSlider');
+  slider.value = currentFrame;
+  if (!robot) return;
+  if (motionData.base_pos_w) {
+    const p = motionData.base_pos_w[currentFrame];
+    robot.position.set(p[0], p[1], p[2]);
+  }
+  if (motionData.base_quat_w) {
+    const q = motionData.base_quat_w[currentFrame];
+    robot.quaternion.set(q[1], q[2], q[3], q[0]);
+  }
+  const val = motionData.joint_pos[currentFrame];
+  motionData.joint_names.forEach((n, i) => {
+    if (jointsMap[n]) jointsMap[n].setJointValue(val[i]);
+  });
+  syncCtrlPanel();
+}
+
+// =========================================================
+//  Keyboard
+// =========================================================
+const keyStates = { up: false, down: false };
+window.addEventListener('keydown', (e) => {
+  if (!motionData) return;
+  // Ignore arrow-value nudges when typing in text inputs
+  const inTextField = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    undo(); e.preventDefault(); return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+    redo(); e.preventDefault(); return;
+  }
+  if (e.key === 'ArrowLeft' && !inTextField) {
+    if (!e.repeat) { update3DRobot(currentFrame - 1); drawCurve(); }
+    e.preventDefault();
+  }
+  if (e.key === 'ArrowRight' && !inTextField) {
+    if (!e.repeat) { update3DRobot(currentFrame + 1); drawCurve(); }
+    e.preventDefault();
+  }
+  if (e.key === 'ArrowUp' && !inTextField) { keyStates.up = true; e.preventDefault(); }
+  if (e.key === 'ArrowDown' && !inTextField) { keyStates.down = true; e.preventDefault(); }
+});
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'ArrowUp') keyStates.up = false;
+  if (e.key === 'ArrowDown') keyStates.down = false;
+});
+
+let nudgeHeld = false;
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  if (motionData && activeIndex >= 0 && (keyStates.up || keyStates.down)) {
+    if (!nudgeHeld) { pushUndo(); nudgeHeld = true; }
+    const step = (activeType === 'pos') ? 0.002 : 0.01;
+    if (keyStates.up) setChannelValue(currentFrame, getChannelValue(currentFrame) + step);
+    if (keyStates.down) setChannelValue(currentFrame, getChannelValue(currentFrame) - step);
+    update3DRobot(currentFrame); drawCurve(); syncCtrlPanel();
+  } else {
+    nudgeHeld = false;
+  }
+}
+animate();
+
+// =========================================================
+//  Timeline slider
+// =========================================================
+document.getElementById('timelineSlider').addEventListener('input', (e) => {
+  update3DRobot(parseInt(e.target.value)); drawCurve();
+});
+
+// =========================================================
+//  URDF load
+// =========================================================
+document.getElementById('loadUrdfBtn').onclick = () => {
+  const name = document.getElementById('urdfName').value.trim();
+  if (!name) return alert('Enter URDF path');
+  new URDFLoader().load(`/static/${name}`, r => {
+    if (robot) scene.remove(robot);
+    robot = r; scene.add(robot);
+    for (const k in robot.joints) jointsMap[k] = robot.joints[k];
+    document.getElementById('loadUrdfBtn').innerText = 'URDF loaded ✓';
+    flash('robot loaded');
+  }, undefined, err => alert('URDF load error: ' + err));
+};
+
+// =========================================================
+//  NPZ load
+// =========================================================
+document.getElementById('npzInput').addEventListener('change', async (e) => {
+  if (!robot) return alert('Load URDF first');
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('statusMsg').innerText = 'uploading…';
+  document.getElementById('statusMsg').style.color = '#666';
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const res = await fetch('/upload_motion', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    motionData = data;
+
+    // Auto-extract notice
+    if (data._auto_extracted && data._auto_extracted.length) {
+      console.info('Auto-extracted fields:', data._auto_extracted);
+      document.getElementById('autoExtractList').innerText = data._auto_extracted.join(', ');
+      document.getElementById('autoExtractBanner').style.display = 'block';
+    } else {
+      document.getElementById('autoExtractBanner').style.display = 'none';
+    }
+    if (data._missing_keys && data._missing_keys.length) {
+      console.warn('NPZ missing keys (filled with defaults):', data._missing_keys);
+    }
+    const autoMsg = data._auto_extracted?.length
+      ? `loaded ⚡ auto: ${data._auto_extracted.join(', ')}`
+      : 'loaded';
+    flash(autoMsg);
+
+    undoStack.length = 0; redoStack.length = 0;
+    floorData = null;
+    rangeA = -1; rangeB = -1; hideRangeToolbar();
+    keyframes = { K1: -1, K2: -1 };
+    trimS = -1; trimE = -1;
+    previewBackup = null;
+    document.getElementById('previewBanner').style.display = 'none';
+    document.getElementById('diagPanel').innerText = 'No diagnostics yet — run Preview.';
+    fetchRobotLimits();
+    document.getElementById('k1Frame').innerText = '—';
+    document.getElementById('k2Frame').innerText = '—';
+    document.getElementById('trimStart').value = 0;
+    document.getElementById('trimEnd').value = data.num_frames - 1;
+    document.getElementById('trimInfo').innerText = `0 → ${data.num_frames - 1}  (${data.num_frames} frames)`;
+    document.getElementById('statusMsg').innerText = `${data.num_frames} frames @ ${data.fps} fps`;
+    document.getElementById('curveEditor').style.display = 'block';
+    document.getElementById('ctrlPanel').style.display = 'flex';
+
+    const slider = document.getElementById('timelineSlider');
+    slider.max = data.num_frames - 1;
+    slider.value = 0;
+
+    const list = document.getElementById('jointListContainer');
+    list.innerHTML = '';
+    const addHeader = (t) => { const d = document.createElement('div'); d.className = 'section-label'; d.innerText = t; list.appendChild(d); };
+    const addItem = (n, t, i, s = false) => {
+      const div = document.createElement('div');
+      div.className = 'joint-item' + (s ? ' special' : '');
+      div.innerHTML = `${n}<span class="mini">${t}[${i}]</span>`;
+      div.onclick = () => selectChannel(t, i, n, div);
+      list.appendChild(div);
+    };
+    addHeader('Base Position');
+    addItem('Base X', 'pos', 0, true); addItem('Base Y', 'pos', 1, true); addItem('Base Z', 'pos', 2, true);
+    addHeader('Base Rotation');
+    addItem('Roll', 'rot', 0, true); addItem('Pitch', 'rot', 1, true); addItem('Yaw', 'rot', 2, true);
+    addHeader('Joints');
+    data.joint_names.forEach((n, i) => addItem(n, 'joint', i));
+
+    if (data.joint_names.length) {
+      selectChannel('joint', 0, data.joint_names[0], list.querySelectorAll('.joint-item')[6]);
+    }
+    update3DRobot(0);
+    setTimeout(resizeEditor, 50);
+  } catch (err) {
+    document.getElementById('statusMsg').innerText = 'ERROR: ' + err.message;
+    document.getElementById('statusMsg').style.color = '#c00';
+    alert('Upload failed: ' + err.message + '\nCheck browser console for details.');
+  }
+});
+
+function selectChannel(type, idx, name, el) {
+  document.querySelectorAll('.joint-item').forEach(x => x.classList.remove('active'));
+  el.classList.add('active');
+  activeType = type; activeIndex = idx; activeLabel = name;
+  document.getElementById('activeJointName').innerText = name;
+  drawCurve(); syncCtrlPanel();
+}
+
+// =========================================================
+//  Save
+// =========================================================
+document.getElementById('saveBtn').onclick = async () => {
+  if (!motionData) return alert('no data');
+  const btn = document.getElementById('saveBtn');
+  btn.innerText = 'saving…'; btn.disabled = true;
+  try {
+    const res = await fetch('/save_motion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(motionData),
+    });
+    if (!res.ok) throw new Error('server error');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'edited.npz';
+    document.body.appendChild(a); a.click(); a.remove();
+    flash('downloaded');
+  } catch (e) { alert(e); }
+  finally { btn.innerText = 'Download NPZ'; btn.disabled = false; }
+};
+
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  resizeEditor();
+});
+
+// =========================================================
+//  Improvement Pipeline
+// =========================================================
+let operatorMeta = {};        // name -> { schema, defaults, requires, produces, description, ... }
+let pipelineSpec = [];        // ordered [{name, enabled, params}, ...]
+let robotLimits = null;       // { joints: {name: {pos_min, pos_max, vel_max, ...}}, joint_order, dof, soft_factor }
+let previewBackup = null;     // snapshot of motionData taken when first Preview ran
+let lastDiagnostics = null;   // { before, after } from latest /pipeline/run
+let draggingIdx = -1;         // index of pl-row being dragged for reorder
+
+const PIPELINE_DEFAULT_ORDER = [
+  'align_origin',
+  'pad_safe_pose',
+  'foot_grounding',
+  'clamp_joint_limits',
+  'smooth',
+  'enforce_kinematic_limits',
+  'boundary_continuity',
+  'mirror',
+  'rederive_kinematics',
+  'diagnostics',
+];
+
+async function fetchOperators() {
+  try {
+    const res = await fetch('/pipeline/operators');
+    const d = await res.json();
+    operatorMeta = {};
+    for (const op of (d.operators || [])) operatorMeta[op.name] = op;
+    // Build the default spec (preserving order, only including known operators)
+    pipelineSpec = PIPELINE_DEFAULT_ORDER
+      .filter(n => operatorMeta[n])
+      .map(n => ({
+        name: n,
+        enabled: operatorMeta[n].always_run ? true : (operatorMeta[n].default_enabled !== false),
+        params: { ...(operatorMeta[n].defaults || {}) },
+      }));
+    // Append any operators we didn't list (future-proof) as disabled by default.
+    for (const name of Object.keys(operatorMeta)) {
+      if (!pipelineSpec.find(s => s.name === name)) {
+        pipelineSpec.push({ name, enabled: false, params: { ...(operatorMeta[name].defaults || {}) } });
+      }
+    }
+    renderPipelineList();
+  } catch (e) {
+    console.warn('fetchOperators failed:', e);
+  }
+}
+
+async function fetchRobotLimits() {
+  const xml = document.getElementById('xmlPath')?.value || 'static/M2v6/M2v6.xml';
+  try {
+    const res = await fetch('/robot/limits?xml=' + encodeURIComponent(xml));
+    const d = await res.json();
+    if (d.error) { console.warn('robot/limits:', d.error); return; }
+    robotLimits = d;
+    drawCurve();
+  } catch (e) {
+    console.warn('fetchRobotLimits failed:', e);
+  }
+}
+
+function renderPipelineList() {
+  const list = document.getElementById('pipelineList');
+  if (!list) return;
+  list.innerHTML = '';
+  for (let i = 0; i < pipelineSpec.length; i++) {
+    const spec = pipelineSpec[i];
+    const meta = operatorMeta[spec.name];
+    if (!meta) continue;
+    const row = document.createElement('div');
+    row.className = 'pl-row' + (spec.enabled ? '' : ' disabled');
+    row.draggable = true;
+    row.dataset.idx = i;
+    row.innerHTML = `
+      <input type="checkbox" ${spec.enabled ? 'checked' : ''} ${meta.always_run ? 'disabled' : ''}>
+      <span class="pl-name" title="${(meta.description || '').replace(/"/g, '&quot;')}">${spec.name}</span>
+      <span class="pl-status" data-name="${spec.name}">—</span>
+      <button class="pl-gear" title="Configure">⚙</button>
+    `;
+    const cb = row.querySelector('input[type=checkbox]');
+    cb.addEventListener('change', () => {
+      spec.enabled = cb.checked;
+      row.classList.toggle('disabled', !spec.enabled);
+    });
+    row.querySelector('.pl-gear').addEventListener('click', () => openOperatorModal(spec.name));
+    row.querySelector('.pl-name').addEventListener('click', () => openOperatorModal(spec.name));
+
+    // --- Drag-and-drop reorder ---
+    row.addEventListener('dragstart', e => {
+      draggingIdx = i;
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => row.style.opacity = '0.45', 0);
+    });
+    row.addEventListener('dragend', () => {
+      draggingIdx = -1;
+      row.style.opacity = '';
+      document.querySelectorAll('.pl-row').forEach(r => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (draggingIdx !== -1 && draggingIdx !== i) row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const from = draggingIdx;
+      if (from === -1 || from === i) return;
+      // always_run operators (rederive_kinematics, diagnostics) must stay at end — guard
+      const moved = pipelineSpec[from];
+      if (moved && moved.name) {
+        const movedMeta = operatorMeta[moved.name];
+        if (movedMeta && movedMeta.always_run && i < pipelineSpec.length - 1) {
+          flash('always-run operators must stay at end'); return;
+        }
+      }
+      pipelineSpec.splice(from, 1);
+      const target = from < i ? i - 1 : i;
+      pipelineSpec.splice(target, 0, moved);
+      draggingIdx = -1;
+      renderPipelineList();
+    });
+
+    list.appendChild(row);
+  }
+}
+
+function setOpStatus(name, level, label) {
+  const el = document.querySelector(`.pl-status[data-name="${name}"]`);
+  if (!el) return;
+  el.className = 'pl-status ' + (level || '');
+  el.innerText = label || '—';
+}
+
+// ---- Operator config modal ----
+let modalActiveName = null;
+function openOperatorModal(name) {
+  const meta = operatorMeta[name];
+  if (!meta) return;
+  const spec = pipelineSpec.find(s => s.name === name);
+  if (!spec) return;
+  modalActiveName = name;
+  document.getElementById('opModalTitle').innerText = name;
+  document.getElementById('opModalDesc').innerText = meta.description || '';
+  const fields = document.getElementById('opModalFields');
+  fields.innerHTML = '';
+  const props = (meta.schema && meta.schema.properties) || {};
+  for (const [key, sch] of Object.entries(props)) {
+    const wrap = document.createElement('div');
+    wrap.className = 'field';
+    const lbl = document.createElement('label');
+    lbl.innerText = key;
+    wrap.appendChild(lbl);
+    let input;
+    const cur = (spec.params && key in spec.params) ? spec.params[key] : sch.default;
+    if (sch.type === 'boolean') {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = !!cur;
+    } else if (sch.type === 'number' || sch.type === 'integer') {
+      input = document.createElement('input');
+      input.type = 'number';
+      input.step = sch.type === 'integer' ? '1' : 'any';
+      input.value = cur ?? '';
+    } else if (sch.type === 'string' && Array.isArray(sch.enum)) {
+      input = document.createElement('select');
+      for (const v of sch.enum) {
+        const opt = document.createElement('option');
+        opt.value = v; opt.innerText = v;
+        if (v === cur) opt.selected = true;
+        input.appendChild(opt);
+      }
+    } else if (sch.type === 'array' && sch.items && Array.isArray(sch.items.enum)) {
+      input = document.createElement('div');
+      input.style.display = 'flex'; input.style.flexWrap = 'wrap'; input.style.gap = '6px';
+      const set = new Set(Array.isArray(cur) ? cur : []);
+      input._values = () => Array.from(input.querySelectorAll('input[type=checkbox]:checked')).map(x => x.value);
+      for (const v of sch.items.enum) {
+        const id = `mfield_${key}_${v}`;
+        const itm = document.createElement('label');
+        itm.style.fontWeight = 'normal';
+        itm.style.fontSize = '11px';
+        itm.innerHTML = `<input type="checkbox" value="${v}" id="${id}" ${set.has(v) ? 'checked' : ''}> ${v}`;
+        input.appendChild(itm);
+      }
+    } else {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.value = cur ?? '';
+    }
+    input.dataset.field = key;
+    input.dataset.kind = sch.type;
+    wrap.appendChild(input);
+    if (sch.description) {
+      const help = document.createElement('div');
+      help.className = 'help';
+      help.innerText = sch.description;
+      wrap.appendChild(help);
+    }
+    fields.appendChild(wrap);
+  }
+  document.getElementById('opModal').style.display = 'flex';
+}
+
+function closeOperatorModal() {
+  document.getElementById('opModal').style.display = 'none';
+  modalActiveName = null;
+}
+
+document.getElementById('opModalCancel').addEventListener('click', closeOperatorModal);
+document.getElementById('opModalReset').addEventListener('click', () => {
+  if (!modalActiveName) return;
+  const spec = pipelineSpec.find(s => s.name === modalActiveName);
+  const meta = operatorMeta[modalActiveName];
+  if (!spec || !meta) return;
+  spec.params = { ...(meta.defaults || {}) };
+  openOperatorModal(modalActiveName);
+});
+document.getElementById('opModalSave').addEventListener('click', () => {
+  if (!modalActiveName) return;
+  const spec = pipelineSpec.find(s => s.name === modalActiveName);
+  if (!spec) return;
+  const fields = document.getElementById('opModalFields');
+  const params = {};
+  for (const inp of fields.querySelectorAll('[data-field]')) {
+    const key = inp.dataset.field;
+    const kind = inp.dataset.kind;
+    if (kind === 'boolean') params[key] = !!inp.checked;
+    else if (kind === 'integer') params[key] = inp.value === '' ? null : parseInt(inp.value, 10);
+    else if (kind === 'number')  params[key] = inp.value === '' ? null : parseFloat(inp.value);
+    else if (kind === 'array')   params[key] = inp._values ? inp._values() : [];
+    else if (kind === 'string')  params[key] = inp.value;
+    else                         params[key] = inp.value;
+  }
+  spec.params = params;
+  closeOperatorModal();
+  flash(`saved params for ${spec.name}`);
+});
+
+// ---- Run / Preview / Apply / Reset ----
+async function runPipeline(applyAfter) {
+  if (!motionData) { alert('Load a motion first'); return; }
+  // Send the *original* (un-previewed) data so the pipeline is deterministic.
+  const sourceMotion = previewBackup || motionData;
+  const xml = document.getElementById('xmlPath')?.value || 'static/M2v6/M2v6.xml';
+  const enabledOps = pipelineSpec.filter(s => s.enabled);
+  if (!enabledOps.length) { alert('No operators enabled'); return; }
+  const previewBtn = document.getElementById('pipelinePreviewBtn');
+  const applyBtn   = document.getElementById('pipelineApplyBtn');
+  previewBtn.disabled = applyBtn.disabled = true;
+  flash('running pipeline…');
+  try {
+    const body = JSON.stringify({
+      motion: sourceMotion,
+      xml_path: xml,
+      operators: enabledOps,
+      return_diff: true,
+    });
+    const res = await fetch('/pipeline/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const out = await res.json();
+    if (out.error) throw new Error(out.error);
+    // Save backup before swapping (only on first preview)
+    if (!previewBackup) previewBackup = snapshot();
+    // Replace motionData with returned bundle (it may have new num_frames)
+    const m = out.motion;
+    motionData.joint_pos      = m.joint_pos;
+    motionData.joint_vel      = m.joint_vel || [];
+    motionData.base_pos_w     = m.base_pos_w;
+    motionData.base_quat_w    = m.base_quat_w;
+    motionData.body_pos_w     = m.body_pos_w || [];
+    motionData.body_quat_w    = m.body_quat_w || [];
+    motionData.body_lin_vel_w = m.body_lin_vel_w || [];
+    motionData.body_ang_vel_w = m.body_ang_vel_w || [];
+    motionData.num_frames     = m.num_frames || (m.joint_pos ? m.joint_pos.length : 0);
+    if (currentFrame >= motionData.num_frames) currentFrame = motionData.num_frames - 1;
+    document.getElementById('timelineSlider').max = motionData.num_frames - 1;
+    document.getElementById('timelineFrameNum').innerText = currentFrame;
+    document.getElementById('timelineSlider').value = currentFrame;
+    document.getElementById('statusMsg').innerText = `${motionData.num_frames} frames @ ${motionData.fps} fps (preview)`;
+    drawCurve(); update3DRobot(currentFrame); syncCtrlPanel();
+    // Audit + diagnostics rendering
+    lastDiagnostics = out.diagnostics;
+    renderAudit(out.audit || []);
+    renderDiagnostics(out.diagnostics);
+    document.getElementById('previewBanner').style.display = applyAfter ? 'none' : 'block';
+    if (applyAfter) {
+      // commit preview as a real edit
+      undoStack.push(previewBackup);
+      if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+      redoStack.length = 0;
+      previewBackup = null;
+      flash('pipeline applied');
+    } else {
+      flash('preview ready');
+    }
+  } catch (e) {
+    alert('Pipeline error: ' + e.message);
+  } finally {
+    previewBtn.disabled = applyBtn.disabled = false;
+  }
+}
+
+function resetPreview() {
+  if (!previewBackup) { flash('no preview to reset'); return; }
+  applySnapshot(previewBackup);
+  // Restore num_frames in slider
+  document.getElementById('timelineSlider').max = motionData.num_frames - 1;
+  document.getElementById('statusMsg').innerText = `${motionData.num_frames} frames @ ${motionData.fps} fps`;
+  previewBackup = null;
+  document.getElementById('previewBanner').style.display = 'none';
+  for (const s of pipelineSpec) setOpStatus(s.name, '', '—');
+  flash('preview discarded');
+}
+
+function renderAudit(audit) {
+  for (const s of pipelineSpec) setOpStatus(s.name, '', '—');
+  for (const a of audit) {
+    const baseName = a.name.replace(/\(auto\)$/, '');
+    const errors = (a.warnings || []).filter(w => w.level === 'error');
+    if (errors.length) setOpStatus(baseName, 'err', 'err');
+    else if ((a.warnings || []).some(w => w.level === 'warn')) setOpStatus(baseName, 'warn', `${a.ms.toFixed(0)}ms`);
+    else setOpStatus(baseName, 'ok', `${a.ms.toFixed(0)}ms`);
+  }
+}
+
+function renderDiagnostics(diag) {
+  const panel = document.getElementById('diagPanel');
+  if (!diag || !diag.after) { panel.innerText = 'No diagnostics'; return; }
+  const before = diag.before || {};
+  const after = diag.after || {};
+  const beforeG = before.global || {};
+  const afterG = after.global || {};
+  const fmt = (n) => (typeof n === 'number' ? n.toFixed(3) : (n ?? '—'));
+  let html = '<div class="diag-row"><b>frames</b><span>' + fmt(beforeG.num_frames) + ' → ' + fmt(afterG.num_frames) + '</span></div>';
+  html += '<div class="diag-row"><b>duration</b><span>' + fmt(beforeG.duration_s) + 's → ' + fmt(afterG.duration_s) + 's</span></div>';
+  if (afterG.base_z_min !== undefined) {
+    html += '<div class="diag-row"><b>base z</b><span>[' + fmt(afterG.base_z_min) + ', ' + fmt(afterG.base_z_max) + ']</span></div>';
+  }
+  if (afterG.foot_slip_total_xy !== undefined) {
+    html += '<div class="diag-row"><b>foot slip Σ</b><span>' + fmt(afterG.foot_slip_total_xy) + ' m</span></div>';
+  }
+  // Per-joint top-3 by acc_max
+  const joints = after.joints || {};
+  const sorted = Object.entries(joints).sort((a, b) => (b[1].acc_max || 0) - (a[1].acc_max || 0)).slice(0, 3);
+  html += '<div style="margin-top:4px; font-weight:bold;">top 3 acc_max</div>';
+  for (const [n, st] of sorted) {
+    html += `<div class="diag-row"><span>${n}</span><span>${fmt(st.acc_max)} rad/s²</span></div>`;
+  }
+  // warnings (capped at 5)
+  const warns = (after.warnings || []).slice(0, 5);
+  for (const w of warns) {
+    html += `<div class="diag-warn"><b>${w.kind || ''}</b> ${w.joint || ''} ${w.value !== undefined ? '= ' + fmt(w.value) : ''} ${w.count !== undefined ? '×' + w.count : ''}</div>`;
+  }
+  panel.innerHTML = html;
+}
+
+// ---- Pipeline preset save / load / export / import ----
+const PRESET_PREFIX = 'pl_preset_';
+
+function _presetKey(name) { return PRESET_PREFIX + name; }
+
+function _serializePreset() {
+  // Only store name + enabled + params; operator order is preserved.
+  return pipelineSpec.map(s => ({ name: s.name, enabled: s.enabled, params: { ...s.params } }));
+}
+
+function _applyPresetData(data) {
+  if (!Array.isArray(data)) throw new Error('invalid preset format');
+  for (const s of data) {
+    const spec = pipelineSpec.find(x => x.name === s.name);
+    if (spec) { spec.enabled = !!s.enabled; spec.params = { ...(s.params || {}) }; }
+  }
+  // Restore operator order from preset (skip unknowns)
+  const ordered = [];
+  for (const s of data) {
+    const idx = pipelineSpec.findIndex(x => x.name === s.name);
+    if (idx !== -1) ordered.push(pipelineSpec.splice(idx, 1)[0]);
+  }
+  // Append any operators not in preset (e.g. newly added)
+  for (const s of pipelineSpec) ordered.push(s);
+  pipelineSpec.length = 0;
+  for (const s of ordered) pipelineSpec.push(s);
+  renderPipelineList();
+}
+
+function savePreset() {
+  const name = prompt('Preset name (letters, digits, _):', 'default');
+  if (!name || !name.trim()) return;
+  const key = _presetKey(name.trim());
+  localStorage.setItem(key, JSON.stringify(_serializePreset()));
+  flash(`preset "${name.trim()}" saved`);
+}
+
+function loadPreset() {
+  const keys = Object.keys(localStorage).filter(k => k.startsWith(PRESET_PREFIX));
+  if (!keys.length) { alert('No saved presets.\nUse "💾 Save" to create one, or "↑ Import" to load from JSON.'); return; }
+  const names = keys.map(k => k.slice(PRESET_PREFIX.length));
+  const name = prompt('Load preset:\n' + names.join(', '), names[0]);
+  if (!name || !name.trim()) return;
+  const raw = localStorage.getItem(_presetKey(name.trim()));
+  if (!raw) { alert(`Preset "${name.trim()}" not found.`); return; }
+  try {
+    _applyPresetData(JSON.parse(raw));
+    flash(`preset "${name.trim()}" loaded`);
+  } catch (e) { alert('Failed to load preset: ' + e.message); }
+}
+
+function exportPreset() {
+  const data = _serializePreset();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'pipeline_preset.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importPreset(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      _applyPresetData(JSON.parse(e.target.result));
+      flash('preset imported');
+    } catch (err) { alert('Import failed: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+document.getElementById('savePresetBtn').addEventListener('click', savePreset);
+document.getElementById('loadPresetBtn').addEventListener('click', loadPreset);
+document.getElementById('exportPresetBtn').addEventListener('click', exportPreset);
+document.getElementById('importPresetInput').addEventListener('change', e => {
+  importPreset(e.target.files[0]);
+  e.target.value = '';  // reset so same file can be re-imported
+});
+
+document.getElementById('pipelinePreviewBtn').addEventListener('click', () => runPipeline(false));
+document.getElementById('pipelineApplyBtn').addEventListener('click', () => {
+  if (previewBackup) {
+    // Already previewing — commit existing preview without re-running.
+    undoStack.push(previewBackup);
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    redoStack.length = 0;
+    previewBackup = null;
+    document.getElementById('previewBanner').style.display = 'none';
+    document.getElementById('statusMsg').innerText = `${motionData.num_frames} frames @ ${motionData.fps} fps`;
+    flash('pipeline applied');
+    return;
+  }
+  runPipeline(true);
+});
+document.getElementById('pipelineResetBtn').addEventListener('click', resetPreview);
+
+// On load: fetch operators + limits.
+fetchOperators();
+fetchRobotLimits();
+
+// =========================================================
+//  Status flash
+// =========================================================
+let flashTimer = null;
+function flash(msg) {
+  const el = document.getElementById('statusBar');
+  el.innerText = msg; el.style.display = 'block';
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { el.style.display = 'none'; }, 1800);
+}
+</script>
+</body>
+</html>
