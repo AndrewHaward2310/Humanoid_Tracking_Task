@@ -48,10 +48,6 @@
     display:flex; flex-direction:column; gap:6px; user-select:text;
   }
   body.motion-active #sidebar { max-height:calc(62vh - 20px); }
-  /* On motion-active layout the right rail stacks: stats (top), ctrlPanel
-     (middle), sceneOptions (bottom). Cap ctrlPanel so it doesn't run into
-     sceneOptions on typical viewports. */
-  body.motion-active #ctrlPanel { max-height:calc(40vh); overflow-y:auto; }
   #sidebar h3 { color: var(--text); font-weight:600; font-size:13px; letter-spacing:0.4px; }
 
   /* Collapsible section headers */
@@ -105,15 +101,12 @@
   button.danger { background: var(--accent-red); }
   button.danger:hover { background:#e87474; }
 
-  /* === Right control panel === */
+  /* === Channel editor (lives inside the sidebar via #ctrlPanelDetails) === */
   #ctrlPanel {
-    position:absolute; top:10px; right:10px; width:260px;
-    background: var(--panel-bg); color: var(--text);
-    border: 1px solid var(--panel-border);
-    padding:10px; border-radius:6px;
-    box-shadow: var(--panel-shadow); backdrop-filter: blur(4px);
-    z-index:100;
-    display:none; flex-direction:column; gap:6px; user-select:text;
+    display:flex; flex-direction:column; gap:6px;
+    margin-top:6px; user-select:text;
+    background: rgba(0,0,0,0.18); padding:8px; border-radius:4px;
+    border:1px solid rgba(255,255,255,0.06);
   }
   #ctrlPanel .row { display:flex; gap:4px; align-items:center; }
   #ctrlPanel .row > * { flex:1; }
@@ -123,6 +116,9 @@
     display:inline-block; padding:2px 6px; border-radius:3px;
     font-size:10px; font-weight:bold;
   }
+  /* Hide the channel editor accordion until a motion is loaded. */
+  #ctrlPanelDetails { display:none; }
+  body.motion-active #ctrlPanelDetails { display:block; }
   .tag.red { background: rgba(226,96,96,0.20); color: #ff9f9f; }
   .tag.green { background: rgba(95,201,122,0.20); color: #9bdfa8; }
   .tag.orange { background: rgba(255,184,77,0.20); color: #ffd28c; }
@@ -141,9 +137,6 @@
   #statsPanel .stat-row { display:flex; justify-content:space-between; gap:8px; }
   #statsPanel .stat-row .key { color: var(--text-dim); }
   #statsPanel .stat-row .val { color: var(--text); font-weight:600; }
-  /* When ctrlPanel is visible, push it below statsPanel */
-  body.motion-active #ctrlPanel { top: 180px; }
-
   /* === Scene Options panel (bottom-right, above curve editor) === */
   #sceneOptions {
     position:absolute; right:10px; width:240px;
@@ -154,7 +147,7 @@
     box-shadow: var(--panel-shadow); backdrop-filter: blur(4px);
     z-index:99;
     display:none; flex-direction:column; gap:6px; user-select:text;
-    max-height: 22vh;
+    max-height: calc(62vh - 200px);
     overflow-y:auto;
   }
   body.motion-active #sceneOptions { display:flex; }
@@ -387,6 +380,53 @@
     Smooth Current Curve (all frames)
   </button>
 
+  <!-- ── Channel Editor (was floating ctrlPanel) ── -->
+  <details id="ctrlPanelDetails" style="margin-top:4px;">
+    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
+      <span style="flex:1;">✎ Channel Editor</span><span style="font-weight:normal; font-size:10px; color:var(--text-dim);">▼</span>
+    </summary>
+    <div id="ctrlPanel">
+      <div style="font-weight:bold; font-size:13px;">
+        <span id="cpChannel">—</span>
+      </div>
+      <div class="small">frame <b id="cpFrame">0</b></div>
+
+      <div class="vbox">
+        <div class="small">Value</div>
+        <input type="number" id="cpValue" step="0.01">
+      </div>
+
+      <div class="vbox">
+        <div class="small">Adjust</div>
+        <div class="row">
+          <button class="sec" data-nudge="-0.1">−0.1</button>
+          <button class="sec" data-nudge="-0.01">−0.01</button>
+          <button class="sec" data-nudge="-0.001">−0.001</button>
+        </div>
+        <div class="row">
+          <button class="sec" data-nudge="0.001">+0.001</button>
+          <button class="sec" data-nudge="0.01">+0.01</button>
+          <button class="sec" data-nudge="0.1">+0.1</button>
+        </div>
+      </div>
+
+      <div class="section-label" style="margin-top:6px;">Keyframes</div>
+      <div class="row">
+        <button id="setK1">Set K1: <span id="k1Frame">—</span></button>
+        <button id="setK2">Set K2: <span id="k2Frame">—</span></button>
+      </div>
+      <button id="interpKeyframes" class="warning">Interpolate K1 → K2 (linear)</button>
+      <button id="clearKeyframes" class="sec">Clear keyframes</button>
+
+      <div class="section-label" style="margin-top:6px;">Copy value</div>
+      <div class="row">
+        <button id="copyValBtn" class="sec">Copy</button>
+        <button id="pasteValBtn" class="sec">Paste</button>
+      </div>
+      <div class="small">Clipboard: <b id="clipVal">—</b></div>
+    </div>
+  </details>
+
   <button id="saveBtn" class="success" style="margin-top:4px;">
     Download NPZ
   </button>
@@ -493,48 +533,6 @@
   <label class="toggle"><input type="checkbox" id="visSkeleton">Show Skeleton</label>
   <label class="toggle"><input type="checkbox" id="visJointAxes">Show Joint Axes</label>
   <label class="toggle"><input type="checkbox" id="visMesh" checked>Show Mesh</label>
-</div>
-
-<!-- RIGHT: Control panel -->
-<div id="ctrlPanel">
-  <div style="font-weight:bold; font-size:13px;">
-    <span id="cpChannel">—</span>
-  </div>
-  <div class="small">frame <b id="cpFrame">0</b></div>
-
-  <div class="vbox">
-    <div class="small">Value</div>
-    <input type="number" id="cpValue" step="0.01">
-  </div>
-
-  <div class="vbox">
-    <div class="small">Adjust</div>
-    <div class="row">
-      <button class="sec" data-nudge="-0.1">−0.1</button>
-      <button class="sec" data-nudge="-0.01">−0.01</button>
-      <button class="sec" data-nudge="-0.001">−0.001</button>
-    </div>
-    <div class="row">
-      <button class="sec" data-nudge="0.001">+0.001</button>
-      <button class="sec" data-nudge="0.01">+0.01</button>
-      <button class="sec" data-nudge="0.1">+0.1</button>
-    </div>
-  </div>
-
-  <div class="section-label">Keyframes</div>
-  <div class="row">
-    <button id="setK1">Set K1: <span id="k1Frame">—</span></button>
-    <button id="setK2">Set K2: <span id="k2Frame">—</span></button>
-  </div>
-  <button id="interpKeyframes" class="warning">Interpolate K1 → K2 (linear)</button>
-  <button id="clearKeyframes" class="sec">Clear keyframes</button>
-
-  <div class="section-label">Copy value</div>
-  <div class="row">
-    <button id="copyValBtn" class="sec">Copy</button>
-    <button id="pasteValBtn" class="sec">Paste</button>
-  </div>
-  <div class="small">Clipboard: <b id="clipVal">—</b></div>
 </div>
 
 <!-- Bottom editor -->
@@ -1727,8 +1725,11 @@ function applyMotionResponse(data) {
   document.getElementById('statusMsg').innerText =
     `${data.num_frames} frames @ ${data.fps} fps${fileLabel}`;
   document.getElementById('curveEditor').style.display = 'block';
-  document.getElementById('ctrlPanel').style.display = 'flex';
   document.body.classList.add('motion-active');
+  // Auto-expand the channel editor accordion the first time motion loads.
+  const cpd = document.getElementById('ctrlPanelDetails');
+  if (cpd && !cpd.dataset.userToggled) cpd.open = true;
+  cpd?.addEventListener('toggle', () => { cpd.dataset.userToggled = '1'; }, { once: true });
 
   const slider = document.getElementById('timelineSlider');
   slider.max = data.num_frames - 1;
