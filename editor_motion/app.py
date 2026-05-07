@@ -277,6 +277,209 @@ def save_motion():
     return jsonify({"error": str(e)}), 500
 
 
+# --------------------------- CSV import / export ----------------------------
+
+
+def _csv_header(joint_names: list[str]) -> list[str]:
+  """vm_soma_retargeter-compatible CSV header.
+
+  Frame, root_translateX/Y/Z (cm), root_quatX/Y/Z/W, <joint names...> (rad)
+  """
+  return (
+    ["Frame",
+     "root_translateX", "root_translateY", "root_translateZ",
+     "root_quatX", "root_quatY", "root_quatZ", "root_quatW"]
+    + list(joint_names)
+  )
+
+
+@app.route("/upload_csv", methods=["POST"])
+def upload_csv():
+  if "file" not in request.files:
+    return jsonify({"error": "No file part"}), 400
+  f = request.files["file"]
+  try:
+    import csv as csv_mod
+    text = f.read().decode("utf-8", errors="replace").splitlines()
+    reader = csv_mod.reader(text)
+    rows = list(reader)
+    if not rows:
+      return jsonify({"error": "empty CSV"}), 400
+    header = [c.strip() for c in rows[0]]
+    body = rows[1:]
+    if len(body) < 1:
+      return jsonify({"error": "no data rows"}), 400
+
+    # Locate columns
+    def col(name):
+      try:
+        return header.index(name)
+      except ValueError:
+        return -1
+
+    has_frame = col("Frame") == 0  # optional first col
+    base_off = 1 if has_frame else 0
+    rt_idx = [col("root_translateX"), col("root_translateY"), col("root_translateZ")]
+    rq_idx = [col("root_quatX"), col("root_quatY"), col("root_quatZ"), col("root_quatW")]
+    if any(i < 0 for i in rt_idx + rq_idx):
+      return jsonify({"error": "CSV missing root_translate*/root_quat* columns"}), 400
+
+    # Joint columns are everything after root_quatW
+    last_root_col = max(rq_idx)
+    joint_names = header[last_root_col + 1:]
+
+    T = len(body)
+    nj = len(joint_names)
+    jp = np.zeros((T, nj), dtype=np.float64)
+    bp = np.zeros((T, 3), dtype=np.float64)
+    bq = np.zeros((T, 4), dtype=np.float64)  # editor uses [w,x,y,z]
+    for ti, r in enumerate(body):
+      bp[ti] = [float(r[rt_idx[0]]) / 100.0,
+                float(r[rt_idx[1]]) / 100.0,
+                float(r[rt_idx[2]]) / 100.0]
+      qx = float(r[rq_idx[0]]); qy = float(r[rq_idx[1]])
+      qz = float(r[rq_idx[2]]); qw = float(r[rq_idx[3]])
+      bq[ti] = [qw, qx, qy, qz]
+      for ji in range(nj):
+        v = r[last_root_col + 1 + ji].strip() if last_root_col + 1 + ji < len(r) else ""
+        jp[ti, ji] = float(v) if v else 0.0
+
+    # Match the schema of _build_motion_response by faking an NpzFile-like dict.
+    class _FakeNpz:
+      def __init__(self, d):
+        self._d = d
+        self.files = list(d.keys())
+      def __getitem__(self, k): return self._d[k]
+      def __contains__(self, k): return k in self._d
+
+    fake = _FakeNpz({
+      "joint_pos": jp,
+      "base_pos_w": bp,
+      "base_quat_w": bq,
+      "joint_names": np.array(joint_names),
+      "fps": np.array([30.0]),
+    })
+    resp = _build_motion_response(fake)
+    resp["_loaded_path"] = ""
+    return jsonify(resp)
+  except Exception as e:
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": str(e)}), 500
+
+
+@app.route("/save_csv", methods=["POST"])
+def save_csv():
+  try:
+    import csv as csv_mod
+    data = request.json or {}
+    if "joint_pos" not in data:
+      return jsonify({"error": "joint_pos required"}), 400
+    jp = np.asarray(data["joint_pos"])
+    bp = np.asarray(data.get("base_pos_w") or np.zeros((jp.shape[0], 3)))
+    bq = np.asarray(data.get("base_quat_w") or np.tile([1.0, 0.0, 0.0, 0.0], (jp.shape[0], 1)))
+    joint_names = list(data.get("joint_names") or [f"joint_{i}" for i in range(jp.shape[1])])
+
+    mem = io.StringIO()
+    w = csv_mod.writer(mem)
+    w.writerow(_csv_header(joint_names))
+    for i in range(jp.shape[0]):
+      px, py, pz = bp[i] * 100.0  # m → cm
+      qw, qx, qy, qz = bq[i]
+      w.writerow([i, px, py, pz, qx, qy, qz, qw, *jp[i].tolist()])
+
+    out = io.BytesIO(mem.getvalue().encode("utf-8"))
+    name = str(data.get("_loaded_name") or "edited_motion").rsplit(".", 1)[0] + ".csv"
+    return send_file(out, mimetype="text/csv", as_attachment=True, download_name=name)
+  except Exception as e:
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": str(e)}), 500
+
+
+# --------------------------- BVH import (via soma_retargeter) ---------------
+
+
+_SOMA_AVAILABLE: bool | None = None
+
+
+def _soma_check() -> tuple[bool, str]:
+  global _SOMA_AVAILABLE
+  if _SOMA_AVAILABLE is False:
+    return False, "soma_retargeter not installed"
+  try:
+    import soma_retargeter  # noqa: F401
+    _SOMA_AVAILABLE = True
+    return True, ""
+  except ImportError as e:
+    _SOMA_AVAILABLE = False
+    return False, f"soma_retargeter import failed: {e}"
+
+
+@app.route("/upload_bvh", methods=["POST"])
+def upload_bvh():
+  ok, why = _soma_check()
+  if not ok:
+    return jsonify({"error": why}), 501
+  if "file" not in request.files:
+    return jsonify({"error": "No file part"}), 400
+  target = (request.form.get("target") or "M2v6").strip()
+  f = request.files["file"]
+  import tempfile
+  tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".bvh")
+  try:
+    f.save(tmp.name)
+    tmp.close()
+    # Lazy imports — heavy deps (Newton/Warp/torch may pull GPU libs).
+    from soma_retargeter.assets import bvh_utils  # type: ignore
+    from soma_retargeter.pipelines import NewtonPipeline  # type: ignore
+
+    skeleton, anim_buffer = bvh_utils.load_bvh(tmp.name)
+    # Best-effort: NewtonPipeline target is a robot index/name.
+    # For minimal scope we surface the error if NewtonPipeline can't build.
+    pipeline = NewtonPipeline(skeleton, source="soma", target=target)
+    csv_buffer = pipeline.retarget(anim_buffer)
+    # csv_buffer has joint_names + per-frame rows (cm + quat xyzw + joints rad).
+    joint_names = list(csv_buffer.joint_names)
+    rows = csv_buffer.rows  # list/array of dicts or arrays — treat as iterable
+    T = len(rows)
+    nj = len(joint_names)
+    jp = np.zeros((T, nj), dtype=np.float64)
+    bp = np.zeros((T, 3), dtype=np.float64)
+    bq = np.zeros((T, 4), dtype=np.float64)
+    for ti, r in enumerate(rows):
+      bp[ti] = [r["root_translateX"] / 100.0, r["root_translateY"] / 100.0, r["root_translateZ"] / 100.0]
+      bq[ti] = [r["root_quatW"], r["root_quatX"], r["root_quatY"], r["root_quatZ"]]
+      for ji, jn in enumerate(joint_names):
+        jp[ti, ji] = r.get(jn, 0.0)
+
+    class _FakeNpz:
+      def __init__(self, d):
+        self._d = d; self.files = list(d.keys())
+      def __getitem__(self, k): return self._d[k]
+      def __contains__(self, k): return k in self._d
+
+    fake = _FakeNpz({
+      "joint_pos": jp,
+      "base_pos_w": bp,
+      "base_quat_w": bq,
+      "joint_names": np.array(joint_names),
+      "fps": np.array([float(getattr(csv_buffer, "fps", 30.0))]),
+    })
+    resp = _build_motion_response(fake)
+    resp["_loaded_name"] = os.path.basename(f.filename or "motion.bvh")
+    return jsonify(resp)
+  except Exception as e:
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": str(e)}), 500
+  finally:
+    try:
+      os.unlink(tmp.name)
+    except OSError:
+      pass
+
+
 # --------------------------- pipeline -------------------------------------
 
 DEFAULT_XML = "static/M2v6/M2v6.xml"

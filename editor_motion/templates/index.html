@@ -4,174 +4,285 @@
 <meta charset="UTF-8">
 <title>Robot Motion Editor v3</title>
 <style>
-  body { margin:0; overflow:hidden; font-family:sans-serif; background:#2d2d2d; color:#222; }
+  /* ImGui-inspired dark theme */
+  :root {
+    --bg-sky-top:    #4a6080;
+    --bg-sky-bot:    #1f2530;
+    --panel-bg:      rgba(35, 38, 45, 0.92);
+    --panel-bg-2:    rgba(48, 52, 60, 0.95);
+    --panel-border:  #555a66;
+    --panel-shadow:  0 4px 15px rgba(0,0,0,0.5);
+    --text:          #e6e6ea;
+    --text-dim:      #9aa0aa;
+    --accent:        #ffb84d;          /* ImGui-orange section labels */
+    --accent-blue:   #4a9eff;
+    --accent-green:  #5fc97a;
+    --accent-red:    #e26060;
+    --hover-bg:      rgba(255,255,255,0.06);
+    --input-bg:      rgba(20, 22, 26, 0.85);
+    --input-border:  #4a4e58;
+  }
+  body {
+    margin:0; overflow:hidden; font-family:'Segoe UI', system-ui, sans-serif;
+    background: linear-gradient(180deg, var(--bg-sky-top) 0%, var(--bg-sky-bot) 100%);
+    color: var(--text);
+  }
   * { user-select:none; }
+
+  /* Common panel base */
+  .panel {
+    background: var(--panel-bg); color: var(--text);
+    border: 1px solid var(--panel-border); border-radius: 6px;
+    box-shadow: var(--panel-shadow); backdrop-filter: blur(4px);
+  }
 
   /* === Left sidebar === */
   #sidebar {
-    position:absolute; top:10px; left:10px; background:rgba(255,255,255,0.95);
-    padding:12px; border-radius:8px; width:280px;
+    position:absolute; top:10px; left:10px;
+    background: var(--panel-bg); color: var(--text);
+    border: 1px solid var(--panel-border);
+    padding:10px; border-radius:6px; width:280px;
     max-height:calc(100vh - 40px); overflow-y:auto;
-    box-shadow:0 4px 15px rgba(0,0,0,0.3); z-index:100;
-    display:flex; flex-direction:column; gap:8px; user-select:text;
+    box-shadow: var(--panel-shadow); backdrop-filter: blur(4px);
+    z-index:100;
+    display:flex; flex-direction:column; gap:6px; user-select:text;
   }
-  /* When the curve editor is open at the bottom, shrink the sidebar so they don't overlap. */
   body.motion-active #sidebar { max-height:calc(62vh - 20px); }
-  body.motion-active #ctrlPanel { max-height:calc(62vh - 20px); overflow-y:auto; }
+  /* On motion-active layout the right rail stacks: stats (top), ctrlPanel
+     (middle), sceneOptions (bottom). Cap ctrlPanel so it doesn't run into
+     sceneOptions on typical viewports. */
+  body.motion-active #ctrlPanel { max-height:calc(40vh); overflow-y:auto; }
+  #sidebar h3 { color: var(--text); font-weight:600; font-size:13px; letter-spacing:0.4px; }
+
   /* Collapsible section headers */
   details > summary.section-label { margin-top:4px; }
   details > summary.section-label::-webkit-details-marker { display:none; }
   details[open] > summary span:last-child { transform:rotate(180deg); display:inline-block; }
   .section-label {
-    font-weight:bold; font-size:11px; color:#666; text-transform:uppercase;
-    margin-top:8px; border-bottom:1px solid #ddd; padding-bottom:2px;
+    font-weight:600; font-size:11px; color: var(--accent); text-transform:uppercase;
+    margin-top:8px; border-bottom:1px solid rgba(255,184,77,0.25); padding-bottom:3px;
+    letter-spacing:0.5px;
   }
   #jointListContainer {
     max-height:260px; min-height:120px; overflow-y:auto; flex-shrink:0;
-    border:1px solid #ccc; background:#f9f9f9;
+    border:1px solid var(--input-border); background: var(--input-bg);
+    border-radius:3px;
   }
   .joint-item {
-    padding:5px 6px; cursor:pointer; font-size:11px; border-bottom:1px solid #eee;
+    padding:5px 6px; cursor:pointer; font-size:11px; color: var(--text);
+    border-bottom:1px solid rgba(255,255,255,0.05);
   }
-  .joint-item.active { background:#007bff; color:white; }
-  .joint-item.special { background:#eef; font-weight:500; }
-  .joint-item .mini { float:right; color:#888; font-size:10px; }
-  .joint-item.active .mini { color:#ddeeff; }
+  .joint-item:hover { background: var(--hover-bg); }
+  .joint-item.active { background: var(--accent-blue); color: #fff; }
+  .joint-item.special { background: rgba(74,158,255,0.10); font-weight:500; }
+  .joint-item .mini { float:right; color: var(--text-dim); font-size:10px; }
+  .joint-item.active .mini { color:#cfe2ff; }
 
   input[type=text], input[type=number], select {
     width:100%; box-sizing:border-box; padding:5px; margin-bottom:3px;
-    font-size:12px; border:1px solid #bbb; border-radius:3px;
-    background:#fff; color:#222;
+    font-size:12px; border:1px solid var(--input-border); border-radius:3px;
+    background: var(--input-bg); color: var(--text);
   }
+  input[type=text]:focus, input[type=number]:focus, select:focus {
+    outline:none; border-color: var(--accent-blue);
+  }
+  input[type=checkbox] { accent-color: var(--accent-green); }
+  small { color: var(--text-dim); }
   button {
-    padding:6px; cursor:pointer; background:#007bff; color:white;
-    border:none; border-radius:3px; font-weight:bold; font-size:11px;
-    transition:background 0.15s;
+    padding:6px; cursor:pointer; background: var(--accent-blue); color:white;
+    border:1px solid rgba(0,0,0,0.25); border-radius:3px; font-weight:600; font-size:11px;
+    transition:background 0.15s, transform 0.05s;
   }
-  button:hover { background:#0056b3; }
-  button:disabled { background:#888; cursor:not-allowed; }
-  button.sec { background:#6c757d; }
-  button.sec:hover { background:#495057; }
-  button.success { background:#28a745; }
-  button.warning { background:#ffc107; color:#000; }
-  button.danger { background:#dc3545; }
+  button:hover { background:#3784dd; }
+  button:active { transform: translateY(1px); }
+  button:disabled { background:#555; color:#999; cursor:not-allowed; }
+  button.sec { background:#444851; color:#e0e0e0; }
+  button.sec:hover { background:#565a64; }
+  button.success { background: var(--accent-green); color:#0c2615; }
+  button.success:hover { background:#7ad690; }
+  button.warning { background:#e6a444; color:#231a08; }
+  button.warning:hover { background:#f0b557; }
+  button.danger { background: var(--accent-red); }
+  button.danger:hover { background:#e87474; }
 
   /* === Right control panel === */
   #ctrlPanel {
     position:absolute; top:10px; right:10px; width:260px;
-    background:rgba(255,255,255,0.95); padding:12px; border-radius:8px;
-    box-shadow:0 4px 15px rgba(0,0,0,0.3); z-index:100;
-    display:none; flex-direction:column; gap:8px; user-select:text;
+    background: var(--panel-bg); color: var(--text);
+    border: 1px solid var(--panel-border);
+    padding:10px; border-radius:6px;
+    box-shadow: var(--panel-shadow); backdrop-filter: blur(4px);
+    z-index:100;
+    display:none; flex-direction:column; gap:6px; user-select:text;
   }
   #ctrlPanel .row { display:flex; gap:4px; align-items:center; }
   #ctrlPanel .row > * { flex:1; }
   #ctrlPanel .vbox { display:flex; flex-direction:column; gap:4px; }
-  #ctrlPanel .small { font-size:10px; color:#666; }
+  #ctrlPanel .small { font-size:10px; color: var(--text-dim); }
   #ctrlPanel .tag {
     display:inline-block; padding:2px 6px; border-radius:3px;
     font-size:10px; font-weight:bold;
   }
-  .tag.red { background:#ffe0e0; color:#c00; }
-  .tag.green { background:#e0ffe8; color:#0a0; }
-  .tag.orange { background:#ffedd0; color:#c60; }
+  .tag.red { background: rgba(226,96,96,0.20); color: #ff9f9f; }
+  .tag.green { background: rgba(95,201,122,0.20); color: #9bdfa8; }
+  .tag.orange { background: rgba(255,184,77,0.20); color: #ffd28c; }
 
-  /* === Bottom editor === */
+  /* === Stats panel (top-right) === */
+  #statsPanel {
+    position:absolute; top:10px; right:10px; width:200px;
+    background: var(--panel-bg); color: var(--text);
+    border: 1px solid var(--panel-border);
+    padding:8px 10px; border-radius:6px;
+    box-shadow: var(--panel-shadow); backdrop-filter: blur(4px);
+    z-index:99;
+    font-family: 'JetBrains Mono', 'Consolas', monospace; font-size:10.5px; line-height:1.5;
+    user-select:text;
+  }
+  #statsPanel .stat-row { display:flex; justify-content:space-between; gap:8px; }
+  #statsPanel .stat-row .key { color: var(--text-dim); }
+  #statsPanel .stat-row .val { color: var(--text); font-weight:600; }
+  /* When ctrlPanel is visible, push it below statsPanel */
+  body.motion-active #ctrlPanel { top: 180px; }
+
+  /* === Scene Options panel (bottom-right, above curve editor) === */
+  #sceneOptions {
+    position:absolute; right:10px; width:240px;
+    bottom: calc(38vh + 10px);
+    background: var(--panel-bg); color: var(--text);
+    border: 1px solid var(--panel-border);
+    padding:10px; border-radius:6px;
+    box-shadow: var(--panel-shadow); backdrop-filter: blur(4px);
+    z-index:99;
+    display:none; flex-direction:column; gap:6px; user-select:text;
+    max-height: 22vh;
+    overflow-y:auto;
+  }
+  body.motion-active #sceneOptions { display:flex; }
+  #sceneOptions .row { display:flex; gap:4px; }
+  #sceneOptions .row > * { flex:1; }
+  #sceneOptions label.toggle {
+    display:flex; align-items:center; gap:6px; font-size:11px;
+    padding:3px 4px; cursor:pointer;
+  }
+  #sceneOptions label.toggle:hover { background: var(--hover-bg); border-radius:3px; }
+
+  /* === Bottom curve editor === */
   #curveEditor {
     position:absolute; bottom:0; left:0; width:100%; height:38vh;
-    background:#fff; border-top:2px solid #444; z-index:100;
+    background: #1a1d22; border-top:2px solid #3a3e48; z-index:100;
     display:none;
   }
   canvas#nativeCurveCanvas {
     width:100%; height:100%; display:block; cursor:crosshair;
+    background: #14171c;
   }
   #editorControls {
     position:absolute; top:6px; left:10px; right:10px;
     display:flex; justify-content:space-between; pointer-events:none;
-    font-size:12px; gap:8px;
+    font-size:12px; gap:8px; color: var(--text);
   }
   .control-box {
-    pointer-events:auto; background:rgba(255,255,255,0.9);
-    padding:3px 8px; border-radius:4px; border:1px solid #ccc; font-size:11px;
+    pointer-events:auto; background: rgba(20,22,26,0.85); color: var(--text);
+    padding:3px 8px; border-radius:4px; border:1px solid var(--input-border); font-size:11px;
   }
   #rangeToolbar {
     position:absolute; top:30px; left:10px;
-    background:rgba(255,255,255,0.95); padding:4px 8px; border-radius:4px;
-    border:1px solid #ccc; display:none; gap:4px; align-items:center;
+    background: var(--panel-bg-2); color: var(--text);
+    padding:4px 8px; border-radius:4px;
+    border:1px solid var(--panel-border); display:none; gap:4px; align-items:center;
     font-size:11px; pointer-events:auto;
   }
   #rangeToolbar button { padding:3px 8px; font-size:10px; }
   #timelineWrapper {
-    position:absolute; bottom:3px; left:10px; right:10px; height:24px;
+    position:absolute; bottom:3px; left:10px; right:10px; height:26px;
     display:flex; align-items:center; gap:8px; z-index:102;
-    background:rgba(255,255,255,0.85); padding:0 8px; border-radius:12px;
+    background: rgba(20,22,26,0.85); color: var(--text);
+    border:1px solid var(--input-border);
+    padding:0 8px; border-radius:13px;
     font-size:11px; pointer-events:auto;
   }
-  input[type=range] { flex:1; cursor:pointer; }
+  #timeSliderRow {
+    position:absolute; bottom:32px; left:10px; right:10px; height:22px;
+    display:flex; align-items:center; gap:8px; z-index:102;
+    background: rgba(20,22,26,0.78); color: var(--text);
+    border:1px solid var(--input-border);
+    padding:0 8px; border-radius:11px;
+    font-size:11px; pointer-events:auto;
+  }
+  #timeSliderRow.hidden { display:none; }
+  input[type=range] { flex:1; cursor:pointer; accent-color: var(--accent-blue); }
 
   /* Status bar */
   #statusBar {
     position:absolute; top:10px; left:50%; transform:translateX(-50%);
-    background:rgba(0,0,0,0.7); color:#fff; padding:4px 12px;
+    background:rgba(0,0,0,0.75); color: var(--text); padding:4px 12px;
     border-radius:12px; font-size:11px; z-index:105; display:none;
+    border:1px solid var(--input-border);
   }
 
   /* === Pipeline section === */
   #pipelineList {
-    border:1px solid #ccc; background:#f9f9f9; max-height:180px; overflow-y:auto;
-    border-radius:3px; flex-shrink:0;
+    border:1px solid var(--input-border); background: var(--input-bg);
+    max-height:180px; overflow-y:auto; border-radius:3px; flex-shrink:0;
   }
   .pl-row {
     display:flex; align-items:center; gap:4px; padding:4px 6px;
-    border-bottom:1px solid #eee; font-size:11px;
+    border-bottom:1px solid rgba(255,255,255,0.05); font-size:11px; color: var(--text);
   }
   .pl-row:last-child { border-bottom:none; }
   .pl-row .pl-name { flex:1; cursor:pointer; }
-  .pl-row .pl-name:hover { color:#007bff; text-decoration:underline; }
-  .pl-row.disabled .pl-name { color:#aaa; }
+  .pl-row .pl-name:hover { color: var(--accent-blue); text-decoration:underline; }
+  .pl-row.disabled .pl-name { color: var(--text-dim); }
   .pl-row .pl-status {
     display:inline-block; min-width:36px; padding:1px 4px; border-radius:3px;
-    font-size:9px; text-align:center; color:#666; background:#eee;
+    font-size:9px; text-align:center; color: var(--text-dim); background: rgba(255,255,255,0.06);
   }
-  .pl-row .pl-status.ok    { background:#d4edda; color:#155724; }
-  .pl-row .pl-status.warn  { background:#fff3cd; color:#856404; }
-  .pl-row .pl-status.err   { background:#f8d7da; color:#721c24; }
+  .pl-row .pl-status.ok    { background: rgba(95,201,122,0.20); color: #9bdfa8; }
+  .pl-row .pl-status.warn  { background: rgba(255,184,77,0.20); color: #ffd28c; }
+  .pl-row .pl-status.err   { background: rgba(226,96,96,0.20); color: #ff9f9f; }
   .pl-row .pl-gear {
-    background:transparent; color:#666; padding:0 4px; font-weight:normal; font-size:14px;
+    background:transparent; color: var(--text-dim); padding:0 4px;
+    font-weight:normal; font-size:14px; border:none;
   }
-  .pl-row .pl-gear:hover { color:#000; background:transparent; }
-  #diagPanel { font-size:10px; max-height:160px; overflow-y:auto; }
+  .pl-row .pl-gear:hover { color: var(--text); background:transparent; }
+  #diagPanel { font-size:10px; max-height:160px; overflow-y:auto; color: var(--text); }
   #diagPanel .diag-row {
-    display:flex; justify-content:space-between; padding:2px 4px; border-bottom:1px solid #eee;
+    display:flex; justify-content:space-between; padding:2px 4px;
+    border-bottom:1px solid rgba(255,255,255,0.05);
   }
-  #diagPanel .diag-warn { color:#856404; background:#fff3cd; padding:3px 5px; margin:2px 0; border-radius:2px; }
-  #diagPanel .diag-err  { color:#721c24; background:#f8d7da; padding:3px 5px; margin:2px 0; border-radius:2px; }
+  #diagPanel .diag-warn { color:#ffd28c; background: rgba(255,184,77,0.15);
+    padding:3px 5px; margin:2px 0; border-radius:2px; }
+  #diagPanel .diag-err  { color:#ff9f9f; background: rgba(226,96,96,0.15);
+    padding:3px 5px; margin:2px 0; border-radius:2px; }
 
   /* Operator config modal */
   #opModal {
     position:fixed; top:0; left:0; width:100%; height:100%;
-    background:rgba(0,0,0,0.5); z-index:1000; display:none;
+    background:rgba(0,0,0,0.6); z-index:1000; display:none;
     align-items:center; justify-content:center;
   }
   #opModal .modal-card {
-    background:#fff; border-radius:8px; padding:18px 22px; min-width:340px; max-width:520px;
-    box-shadow:0 8px 30px rgba(0,0,0,0.4); color:#222;
+    background: var(--panel-bg-2); color: var(--text); border:1px solid var(--panel-border);
+    border-radius:6px; padding:18px 22px; min-width:340px; max-width:520px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6);
   }
-  #opModal h4 { margin:0 0 6px 0; }
-  #opModal .desc { font-size:11px; color:#666; margin-bottom:12px; }
+  #opModal h4 { margin:0 0 6px 0; color: var(--accent); }
+  #opModal .desc { font-size:11px; color: var(--text-dim); margin-bottom:12px; }
   #opModal .field { margin-bottom:8px; display:flex; flex-direction:column; gap:2px; }
   #opModal .field label { font-size:11px; font-weight:bold; }
-  #opModal .field .help  { font-size:10px; color:#888; }
+  #opModal .field .help  { font-size:10px; color: var(--text-dim); }
   #opModal .modal-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
 
   /* Preview banner */
   #previewBanner {
-    display:none; background:#cce5ff; color:#004085; border:1px solid #80bdff;
+    display:none; background: rgba(74,158,255,0.18); color:#bcdaff;
+    border:1px solid rgba(74,158,255,0.45);
     border-radius:4px; padding:5px 8px; font-size:10px; text-align:center;
   }
   /* Drag-reorder highlight */
   .pl-row.drag-over {
-    background: rgba(0,123,255,0.12);
-    outline: 1px dashed #007bff;
+    background: rgba(74,158,255,0.18);
+    outline: 1px dashed var(--accent-blue);
   }
   .pl-row[draggable=true] { cursor: grab; }
   .pl-row[draggable=true]:active { cursor: grabbing; }
@@ -181,32 +292,47 @@
 
   /* Folder browser */
   #folderFileList {
-    border:1px solid #ccc; background:#f9f9f9; max-height:180px; overflow-y:auto;
-    border-radius:3px; display:none;
+    border:1px solid var(--input-border); background: var(--input-bg);
+    max-height:180px; overflow-y:auto; border-radius:3px; display:none;
   }
   .folder-item {
-    padding:4px 6px; cursor:pointer; font-size:11px; border-bottom:1px solid #eee;
+    padding:4px 6px; cursor:pointer; font-size:11px; color: var(--text);
+    border-bottom:1px solid rgba(255,255,255,0.05);
     display:flex; gap:6px; align-items:center;
   }
   .folder-item:last-child { border-bottom:none; }
-  .folder-item:hover { background:#eef; }
-  .folder-item.active { background:#007bff; color:white; }
+  .folder-item:hover { background: var(--hover-bg); }
+  .folder-item.active { background: var(--accent-blue); color:#fff; }
   .folder-item .fname { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .folder-item .fsize { color:#888; font-size:9px; }
-  .folder-item.active .fsize { color:#ddeeff; }
+  .folder-item .fsize { color: var(--text-dim); font-size:9px; }
+  .folder-item.active .fsize { color: #cfe2ff; }
+
+  /* Auto-extract banner */
+  #autoExtractBanner {
+    background: rgba(255,184,77,0.18); color: #ffd28c;
+    border:1px solid rgba(255,184,77,0.45);
+  }
 
   /* Play/Pause button */
   #playPauseBtn {
     flex:none; padding:2px 8px; font-size:13px; line-height:1;
-    background:#28a745; color:white; border:none; border-radius:10px; cursor:pointer;
+    background: var(--accent-green); color:#0c2615;
+    border:1px solid rgba(0,0,0,0.3); border-radius:10px; cursor:pointer;
   }
-  #playPauseBtn:hover { background:#1e7e34; }
-  #playPauseBtn.playing { background:#dc3545; }
-  #playPauseBtn.playing:hover { background:#a71d2a; }
+  #playPauseBtn:hover { background:#7ad690; }
+  #playPauseBtn.playing { background: var(--accent-red); color:#fff; }
+  #playPauseBtn.playing:hover { background:#e87474; }
   #playSpeed {
     flex:none; width:46px; padding:1px 3px; margin:0; font-size:10px;
-    border:1px solid #bbb; border-radius:3px;
+    border:1px solid var(--input-border); border-radius:3px;
   }
+  #timeSliderToggle {
+    flex:none; padding:2px 6px; font-size:12px; line-height:1;
+    background: rgba(255,255,255,0.08); color: var(--text);
+    border:1px solid var(--input-border); border-radius:10px; cursor:pointer;
+  }
+  #timeSliderToggle:hover { background: var(--hover-bg); }
+  #timeSliderToggle.active { background: var(--accent-blue); color:#fff; }
 </style>
 <script type="importmap">
 {
@@ -334,6 +460,41 @@
   </div>
 </div>
 
+<!-- TOP-RIGHT: Stats panel -->
+<div id="statsPanel">
+  <div class="stat-row"><span class="key">Render FPS</span><span class="val" id="statRenderFps">—</span></div>
+  <div class="stat-row"><span class="key">Frame</span><span class="val" id="statFrame">— / —</span></div>
+  <div class="stat-row"><span class="key">Time</span><span class="val" id="statTime">— / —</span></div>
+  <div class="stat-row"><span class="key">Motion FPS</span><span class="val" id="statMotionFps">—</span></div>
+  <div class="stat-row"><span class="key">Joints</span><span class="val" id="statJoints">—</span></div>
+  <div class="stat-row"><span class="key">Bodies</span><span class="val" id="statBodies">—</span></div>
+</div>
+
+<!-- BOTTOM-RIGHT: Scene Options panel -->
+<div id="sceneOptions">
+  <div class="section-label">Motion</div>
+  <div class="row">
+    <button id="sceneSaveNpz" class="success">Save NPZ</button>
+    <button id="sceneSaveCsv" class="success">Save CSV</button>
+  </div>
+  <div class="row">
+    <label class="sec" style="flex:1; text-align:center; cursor:pointer; padding:6px; border-radius:3px; background:#444851; color:#e0e0e0; font-size:11px; font-weight:600;">
+      Load CSV<input id="loadCsvInput" type="file" accept=".csv" style="display:none">
+    </label>
+    <label class="sec" style="flex:1; text-align:center; cursor:pointer; padding:6px; border-radius:3px; background:#444851; color:#e0e0e0; font-size:11px; font-weight:600;">
+      Load BVH<input id="loadBvhInput" type="file" accept=".bvh" style="display:none">
+    </label>
+  </div>
+  <small id="bvhStatus" style="font-size:10px;">BVH retarget target uses currently-loaded URDF.</small>
+
+  <div class="section-label">Visibility</div>
+  <label class="toggle"><input type="checkbox" id="visFloor" checked>Show Floor Grid</label>
+  <label class="toggle"><input type="checkbox" id="visAxes" checked>Show World Axes</label>
+  <label class="toggle"><input type="checkbox" id="visSkeleton">Show Skeleton</label>
+  <label class="toggle"><input type="checkbox" id="visJointAxes">Show Joint Axes</label>
+  <label class="toggle"><input type="checkbox" id="visMesh" checked>Show Mesh</label>
+</div>
+
 <!-- RIGHT: Control panel -->
 <div id="ctrlPanel">
   <div style="font-weight:bold; font-size:13px;">
@@ -394,13 +555,19 @@
     <button id="rangeOffsetPlus">+0.05</button>
     <button id="rangeClear" class="sec">Clear</button>
   </div>
+  <div id="timeSliderRow" class="hidden">
+    <span style="color:var(--text-dim);">Time</span>
+    <input type="range" id="timeSlider" min="0" max="1" step="0.01" value="0">
+    <span id="timeDisplay" style="font-family:monospace; min-width:90px; text-align:right;">0.00s / 0.00s</span>
+  </div>
   <div id="timelineWrapper">
     <button id="playPauseBtn" title="Play/Pause (Space)">▶</button>
     <input id="playSpeed" type="number" step="0.1" min="0.1" max="8" value="1"
            title="Playback speed multiplier">
-    <label style="font-size:10px; color:#555; display:flex; align-items:center; gap:2px;">
+    <label style="font-size:10px; color:var(--text-dim); display:flex; align-items:center; gap:2px;">
       <input type="checkbox" id="playLoop" checked style="margin:0;">loop
     </label>
+    <button id="timeSliderToggle" title="Toggle time slider (seconds)">⏱</button>
     <span>Frame</span>
     <input type="range" id="timelineSlider" min="0" max="100" value="0">
     <span id="timelineFrameNum">0</span>
@@ -1106,17 +1273,58 @@ document.getElementById('exportTrimBtn').onclick = async () => {
 //  3D scene
 // =========================================================
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x2d2d2d);
-scene.add(new THREE.GridHelper(50, 50).rotateX(Math.PI / 2));
-scene.add(new THREE.AxesHelper(1));
+
+// Sky gradient backdrop. Z is "up" in this scene (camera.up = +Z), so we map
+// the world-space Z component of each pixel direction to interpolate between
+// horizon and zenith colors.
+{
+  const skyGeo = new THREE.SphereGeometry(500, 32, 16);
+  const skyMat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms: {
+      topColor:    { value: new THREE.Color(0x6e8db0) },  // sky blue/grey
+      midColor:    { value: new THREE.Color(0x3d4a5e) },  // horizon
+      bottomColor: { value: new THREE.Color(0x14181f) },  // ground haze
+    },
+    vertexShader: `
+      varying vec3 vDir;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vDir = normalize(wp.xyz);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: `
+      uniform vec3 topColor;
+      uniform vec3 midColor;
+      uniform vec3 bottomColor;
+      varying vec3 vDir;
+      void main() {
+        float h = vDir.z;
+        vec3 col;
+        if (h >= 0.0) col = mix(midColor, topColor, smoothstep(0.0, 0.7, h));
+        else          col = mix(midColor, bottomColor, smoothstep(0.0, 0.6, -h));
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  });
+  scene.add(new THREE.Mesh(skyGeo, skyMat));
+}
+
+// Subtle floor grid + axes (kept toggle-able later)
+const floorGrid = new THREE.GridHelper(50, 50, 0x556070, 0x33394a);
+floorGrid.rotateX(Math.PI / 2);
+scene.add(floorGrid);
+const axesHelper = new THREE.AxesHelper(1);
+scene.add(axesHelper);
+
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 1000);
 camera.position.set(3, -3, 2);
 camera.up.set(0, 0, 1);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
-scene.add(new THREE.DirectionalLight(0xffffff, 1.5).translateZ(10));
-scene.add(new THREE.AmbientLight(0x606060));
+scene.add(new THREE.DirectionalLight(0xffffff, 1.4).translateZ(10));
+scene.add(new THREE.AmbientLight(0x808088, 0.9));
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
@@ -1148,8 +1356,19 @@ function update3DRobot(f) {
   document.getElementById('timelineFrameNum').innerText = currentFrame;
   const slider = document.getElementById('timelineSlider');
   slider.value = currentFrame;
+  // Sync time slider + label
+  const fps = motionData.fps || motionData.framerate || 30;
+  const t = currentFrame / fps;
+  const totalT = motionData.num_frames / fps;
+  const tSlider = document.getElementById('timeSlider');
+  tSlider.max = totalT.toFixed(3);
+  tSlider.value = t.toFixed(3);
+  document.getElementById('timeDisplay').innerText =
+    `${t.toFixed(2)}s / ${totalT.toFixed(2)}s`;
   poseRobotFast(currentFrame);
   syncCtrlPanel();
+  // Refresh skeleton overlay if it's visible (the bones moved with the pose)
+  if (_skeletonHelper) toggleSkeletonHelper(true);
 }
 
 // =========================================================
@@ -1192,6 +1411,7 @@ window.addEventListener('keyup', (e) => {
 let nudgeHeld = false;
 function animate() {
   requestAnimationFrame(animate);
+  _tickRenderFps();
   controls.update();
   renderer.render(scene, camera);
   if (isPlaying && motionData) {
@@ -1286,12 +1506,144 @@ document.getElementById('playSpeed').addEventListener('input', () => {
 });
 
 // =========================================================
-//  Timeline slider
+//  Timeline slider (frame) + Time slider (seconds) sync
 // =========================================================
 document.getElementById('timelineSlider').addEventListener('input', (e) => {
   stopPlayback();
   update3DRobot(parseInt(e.target.value)); drawCurve();
 });
+
+document.getElementById('timeSlider').addEventListener('input', (e) => {
+  if (!motionData) return;
+  stopPlayback();
+  const fps = motionData.fps || motionData.framerate || 30;
+  const f = Math.round(parseFloat(e.target.value) * fps);
+  update3DRobot(f); drawCurve();
+});
+
+// Toggle button for time slider visibility (state persisted)
+const _timeSliderToggle = document.getElementById('timeSliderToggle');
+function _applyTimeSliderState(show) {
+  document.getElementById('timeSliderRow').classList.toggle('hidden', !show);
+  _timeSliderToggle.classList.toggle('active', show);
+}
+_timeSliderToggle.onclick = () => {
+  const cur = !document.getElementById('timeSliderRow').classList.contains('hidden');
+  _applyTimeSliderState(!cur);
+  try { localStorage.setItem('editor_motion.show_time_slider', !cur ? '1' : '0'); } catch (_) {}
+};
+try {
+  _applyTimeSliderState(localStorage.getItem('editor_motion.show_time_slider') === '1');
+} catch (_) { _applyTimeSliderState(false); }
+
+// =========================================================
+//  Stats panel
+// =========================================================
+// NOTE: These use `var` (not `let`) because `_tickRenderFps` is invoked from
+// `animate()`, which is called above this line — `let` would put these in TDZ
+// at first call and throw, halting the rest of the module.
+var _renderFrameCount = 0;
+var _renderFpsLastT = performance.now();
+var _renderFpsValue = 0;
+function _tickRenderFps() {
+  _renderFrameCount++;
+  const now = performance.now();
+  const dt = now - _renderFpsLastT;
+  if (dt >= 500) {
+    _renderFpsValue = (_renderFrameCount * 1000) / dt;
+    _renderFrameCount = 0;
+    _renderFpsLastT = now;
+  }
+}
+
+function updateStatsPanel() {
+  const set = (id, v) => { document.getElementById(id).innerText = v; };
+  set('statRenderFps', _renderFpsValue.toFixed(1));
+  if (!motionData) {
+    set('statFrame', '— / —');
+    set('statTime', '— / —');
+    set('statMotionFps', '—');
+    set('statJoints', '—');
+    set('statBodies', '—');
+    return;
+  }
+  const fps = motionData.fps || motionData.framerate || 30;
+  const N = motionData.num_frames;
+  const t = currentFrame / fps;
+  const totalT = N / fps;
+  set('statFrame', `${currentFrame} / ${N - 1}`);
+  set('statTime', `${t.toFixed(2)}s / ${totalT.toFixed(2)}s`);
+  set('statMotionFps', fps.toFixed(1));
+  set('statJoints', motionData.joint_names.length);
+  set('statBodies', (motionData.body_names || []).length);
+}
+setInterval(updateStatsPanel, 250);
+
+// =========================================================
+//  Scene Options visibility toggles
+// =========================================================
+document.getElementById('visFloor').addEventListener('change', (e) => {
+  floorGrid.visible = e.target.checked;
+});
+document.getElementById('visAxes').addEventListener('change', (e) => {
+  axesHelper.visible = e.target.checked;
+});
+document.getElementById('visMesh').addEventListener('change', (e) => {
+  if (!robot) return;
+  robot.traverse(o => { if (o.isMesh) o.visible = e.target.checked; });
+});
+document.getElementById('visSkeleton').addEventListener('change', (e) => {
+  toggleSkeletonHelper(e.target.checked);
+});
+document.getElementById('visJointAxes').addEventListener('change', (e) => {
+  toggleJointAxesHelpers(e.target.checked);
+});
+
+// Skeleton overlay (lines connecting joint origins)
+let _skeletonHelper = null;
+function toggleSkeletonHelper(show) {
+  if (_skeletonHelper) {
+    scene.remove(_skeletonHelper);
+    _skeletonHelper.geometry.dispose();
+    _skeletonHelper.material.dispose();
+    _skeletonHelper = null;
+  }
+  if (!show || !robot) return;
+  // Build line segments from each joint to its parent
+  const positions = [];
+  robot.traverse(node => {
+    const parent = node.parent;
+    if (!parent || !parent.isObject3D || node === robot) return;
+    if (!node.isURDFLink && !node.isURDFJoint) return;
+    if (parent === robot && !node.isURDFLink) return;
+    const a = new THREE.Vector3(); node.getWorldPosition(a);
+    const b = new THREE.Vector3(); parent.getWorldPosition(b);
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+  });
+  if (!positions.length) return;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const m = new THREE.LineBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.85 });
+  _skeletonHelper = new THREE.LineSegments(g, m);
+  _skeletonHelper.userData.isSkeletonHelper = true;
+  scene.add(_skeletonHelper);
+}
+
+// Per-joint axis helpers (small AxesHelper at each URDF joint)
+const _jointAxesHelpers = [];
+function toggleJointAxesHelpers(show) {
+  // Clean up
+  _jointAxesHelpers.forEach(h => { h.parent && h.parent.remove(h); h.geometry?.dispose(); h.material?.dispose?.(); });
+  _jointAxesHelpers.length = 0;
+  if (!show || !robot) return;
+  robot.traverse(node => {
+    if (node.isURDFJoint) {
+      const ax = new THREE.AxesHelper(0.08);
+      node.add(ax);
+      _jointAxesHelpers.push(ax);
+    }
+  });
+}
 
 // =========================================================
 //  URDF load
@@ -1496,6 +1848,83 @@ try {
   const last = localStorage.getItem('editor_motion.last_folder');
   if (last) document.getElementById('folderPath').value = last;
 } catch (_) {}
+
+// Scene Options: Save NPZ / Save CSV mirror the sidebar Download NPZ button
+document.getElementById('sceneSaveNpz').onclick = () => {
+  document.getElementById('saveBtn').click();
+};
+document.getElementById('sceneSaveCsv').onclick = async () => {
+  if (!motionData) return alert('No motion loaded');
+  const btn = document.getElementById('sceneSaveCsv');
+  btn.disabled = true; btn.innerText = 'saving…';
+  try {
+    const res = await fetch('/save_csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(motionData),
+    });
+    if (!res.ok) {
+      const t = await res.text(); throw new Error(t.slice(0, 200));
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (motionData._loaded_name || 'edited_motion').replace(/\.npz$/i, '') + '.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    flash('CSV downloaded');
+  } catch (err) {
+    alert('Save CSV failed: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.innerText = 'Save CSV';
+  }
+};
+
+document.getElementById('loadCsvInput').addEventListener('change', async (e) => {
+  if (!robot) return alert('Load URDF first');
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const res = await fetch('/upload_csv', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    data._loaded_name = file.name;
+    applyMotionResponse(data);
+    setActiveFolderFile(null);
+  } catch (err) {
+    alert('CSV upload failed: ' + err.message);
+  } finally {
+    e.target.value = '';
+  }
+});
+
+document.getElementById('loadBvhInput').addEventListener('change', async (e) => {
+  if (!robot) return alert('Load URDF first');
+  const file = e.target.files[0];
+  if (!file) return;
+  const sel = document.getElementById('urdfName');
+  const robotName = (sel.value || '').split('/')[0];  // e.g. "M2v6"
+  const fd = new FormData(); fd.append('file', file); fd.append('target', robotName);
+  const status = document.getElementById('bvhStatus');
+  status.innerText = 'retargeting…'; status.style.color = '#9aa0aa';
+  try {
+    const res = await fetch('/upload_bvh', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    data._loaded_name = file.name;
+    applyMotionResponse(data);
+    setActiveFolderFile(null);
+    status.innerText = `loaded ${file.name} → ${robotName}`;
+    status.style.color = '#9bdfa8';
+  } catch (err) {
+    status.innerText = 'BVH retarget failed: ' + err.message;
+    status.style.color = '#ff9f9f';
+  } finally {
+    e.target.value = '';
+  }
+});
 
 async function loadMotionByPath(path, name) {
   if (!robot) return alert('Load URDF first');
