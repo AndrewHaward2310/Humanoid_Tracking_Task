@@ -39,14 +39,101 @@ _M2V6_JOINT_NAMES = [
   "right_elbow_joint", "right_wrist_yaw_joint", "right_wrist_pitch_joint",
   "right_wrist_roll_joint",
 ]
+_MINI_M1V1_JOINT_NAMES = [
+  "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+  "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+  "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+  "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+  "waist_joint",
+  "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
+  "left_elbow_joint", "left_wrist_yaw_joint",
+  "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
+  "right_elbow_joint", "right_wrist_yaw_joint",
+]
 _JOINT_PRESETS: dict[int, list[str]] = {
   27: _M2V6_JOINT_NAMES,
+  23: _MINI_M1V1_JOINT_NAMES,
 }
 
 
 @app.route("/")
 def index():
   return render_template("index.html")
+
+
+def _build_motion_response(data) -> dict:
+  """Convert a loaded NPZ (NpzFile) into the editor's JSON payload."""
+  keys = set(data.files)
+  if "joint_pos" not in keys:
+    raise ValueError("npz missing 'joint_pos'")
+  jp = np.asarray(data["joint_pos"])
+  T = jp.shape[0]
+  nj = jp.shape[1]
+
+  def _list(name, shape=None, default=None):
+    if name in keys:
+      return np.asarray(data[name]).tolist()
+    if default is not None:
+      return default
+    if shape is not None:
+      return np.zeros(shape).tolist()
+    return []
+
+  auto_extracted: list[str] = []
+
+  if "base_pos_w" in keys:
+    base_pos_w = np.asarray(data["base_pos_w"]).tolist()
+  elif "body_pos_w" in keys:
+    bpw = np.asarray(data["body_pos_w"])
+    if bpw.ndim == 3 and bpw.shape[0] == T:
+      base_pos_w = bpw[:, 0, :].tolist()
+      auto_extracted.append("base_pos_w")
+    else:
+      base_pos_w = np.zeros((T, 3)).tolist()
+  else:
+    base_pos_w = np.zeros((T, 3)).tolist()
+
+  if "base_quat_w" in keys:
+    base_quat_w = np.asarray(data["base_quat_w"]).tolist()
+  elif "body_quat_w" in keys:
+    bqw = np.asarray(data["body_quat_w"])
+    if bqw.ndim == 3 and bqw.shape[0] == T:
+      base_quat_w = bqw[:, 0, :].tolist()
+      auto_extracted.append("base_quat_w")
+    else:
+      base_quat_w = [[1.0, 0.0, 0.0, 0.0]] * T
+  else:
+    base_quat_w = [[1.0, 0.0, 0.0, 0.0]] * T
+
+  if "joint_names" in keys:
+    joint_names = np.asarray(data["joint_names"]).tolist()
+  elif nj in _JOINT_PRESETS:
+    joint_names = _JOINT_PRESETS[nj]
+    auto_extracted.append(f"joint_names(M2v6-{nj}dof)")
+  else:
+    joint_names = [f"joint_{i}" for i in range(nj)]
+
+  return {
+    "joint_pos": jp.tolist(),
+    "joint_vel": _list("joint_vel", shape=(T, nj)),
+    "joint_names": joint_names,
+    "body_names": _list("body_names", default=[]),
+    "base_pos_w": base_pos_w,
+    "base_quat_w": base_quat_w,
+    "body_pos_w": _list("body_pos_w", default=[]),
+    "body_quat_w": _list("body_quat_w", default=[]),
+    "body_lin_vel_w": _list("body_lin_vel_w", default=[]),
+    "body_ang_vel_w": _list("body_ang_vel_w", default=[]),
+    "fps": float(np.asarray(data["fps"]).flat[0]) if "fps" in keys else 30.0,
+    "framerate": float(np.asarray(data["framerate"]).flat[0]) if "framerate" in keys else 30.0,
+    "num_frames": T,
+    "_missing_keys": sorted(
+      {"joint_names", "body_names", "base_pos_w", "base_quat_w",
+       "body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w",
+       "fps", "framerate", "joint_vel"} - keys
+    ),
+    "_auto_extracted": auto_extracted,
+  }
 
 
 @app.route("/upload_motion", methods=["POST"])
@@ -56,81 +143,85 @@ def upload_motion():
   f = request.files["file"]
   try:
     data = np.load(f, allow_pickle=False)
-    keys = set(data.files)
-    # Required
-    if "joint_pos" not in keys:
-      return jsonify({"error": "npz missing 'joint_pos'"}), 400
-    jp = np.asarray(data["joint_pos"])
-    T = jp.shape[0]
-    nj = jp.shape[1]
+    return jsonify(_build_motion_response(data))
+  except Exception as e:
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": str(e)}), 500
 
-    def _list(name, shape=None, default=None):
-      if name in keys:
-        return np.asarray(data[name]).tolist()
-      if default is not None:
-        return default
-      if shape is not None:
-        return np.zeros(shape).tolist()
-      return []
 
-    auto_extracted: list[str] = []
+@app.route("/robots", methods=["GET"])
+def list_robots():
+  """List robots in static/. Each robot dir is expected to contain a top-level
+  URDF in `<robot>/urdf/*.urdf` (linkage/sub-URDFs are ignored)."""
+  static_root = os.path.abspath("static")
+  robots = []
+  if not os.path.isdir(static_root):
+    return jsonify({"robots": robots})
+  for name in sorted(os.listdir(static_root)):
+    rdir = os.path.join(static_root, name)
+    if not os.path.isdir(rdir):
+      continue
+    candidates = []
+    urdf_dir = os.path.join(rdir, "urdf")
+    if os.path.isdir(urdf_dir):
+      for f in sorted(os.listdir(urdf_dir)):
+        if f.lower().endswith(".urdf"):
+          candidates.append(f"{name}/urdf/{f}")
+    for f in sorted(os.listdir(rdir)):
+      if f.lower().endswith(".urdf"):
+        candidates.append(f"{name}/{f}")
+    if candidates:
+      robots.append({"name": name, "urdf": candidates[0], "all": candidates})
+  return jsonify({"robots": robots})
 
-    # ── Auto-extract base_pos_w from body_pos_w[:, 0, :] ──────────────────
-    if "base_pos_w" in keys:
-      base_pos_w = np.asarray(data["base_pos_w"]).tolist()
-    elif "body_pos_w" in keys:
-      bpw = np.asarray(data["body_pos_w"])
-      if bpw.ndim == 3 and bpw.shape[0] == T:
-        base_pos_w = bpw[:, 0, :].tolist()
-        auto_extracted.append("base_pos_w")
-      else:
-        base_pos_w = np.zeros((T, 3)).tolist()
-    else:
-      base_pos_w = np.zeros((T, 3)).tolist()
 
-    # ── Auto-extract base_quat_w from body_quat_w[:, 0, :] ────────────────
-    if "base_quat_w" in keys:
-      base_quat_w = np.asarray(data["base_quat_w"]).tolist()
-    elif "body_quat_w" in keys:
-      bqw = np.asarray(data["body_quat_w"])
-      if bqw.ndim == 3 and bqw.shape[0] == T:
-        base_quat_w = bqw[:, 0, :].tolist()
-        auto_extracted.append("base_quat_w")
-      else:
-        base_quat_w = [[1.0, 0.0, 0.0, 0.0]] * T
-    else:
-      base_quat_w = [[1.0, 0.0, 0.0, 0.0]] * T
+@app.route("/list_motions", methods=["GET"])
+def list_motions():
+  """List .npz files in a server-side folder (non-recursive)."""
+  folder = (request.args.get("dir") or "").strip()
+  if not folder:
+    return jsonify({"error": "dir is required"}), 400
+  folder = os.path.expanduser(folder)
+  if not os.path.isdir(folder):
+    return jsonify({"error": f"not a directory: {folder}"}), 400
+  files = []
+  try:
+    for name in sorted(os.listdir(folder)):
+      if not name.lower().endswith(".npz"):
+        continue
+      full = os.path.join(folder, name)
+      if not os.path.isfile(full):
+        continue
+      try:
+        st = os.stat(full)
+        files.append({
+          "name": name,
+          "path": os.path.abspath(full),
+          "size": st.st_size,
+          "mtime": st.st_mtime,
+        })
+      except OSError:
+        continue
+  except OSError as e:
+    return jsonify({"error": str(e)}), 500
+  return jsonify({"dir": os.path.abspath(folder), "files": files})
 
-    # ── Auto joint_names from robot preset ────────────────────────────────
-    if "joint_names" in keys:
-      joint_names = np.asarray(data["joint_names"]).tolist()
-    elif nj in _JOINT_PRESETS:
-      joint_names = _JOINT_PRESETS[nj]
-      auto_extracted.append(f"joint_names(M2v6-{nj}dof)")
-    else:
-      joint_names = [f"joint_{i}" for i in range(nj)]
 
-    resp = {
-      "joint_pos": jp.tolist(),
-      "joint_vel": _list("joint_vel", shape=(T, nj)),
-      "joint_names": joint_names,
-      "body_names": _list("body_names", default=[]),
-      "base_pos_w": base_pos_w,
-      "base_quat_w": base_quat_w,
-      "body_pos_w": _list("body_pos_w", default=[]),
-      "body_quat_w": _list("body_quat_w", default=[]),
-      "body_lin_vel_w": _list("body_lin_vel_w", default=[]),
-      "body_ang_vel_w": _list("body_ang_vel_w", default=[]),
-      "fps": float(np.asarray(data["fps"]).flat[0]) if "fps" in keys else 30.0,
-      "framerate": float(np.asarray(data["framerate"]).flat[0]) if "framerate" in keys else 30.0,
-      "num_frames": T,
-      "_missing_keys": sorted(
-        {"joint_names","body_names","base_pos_w","base_quat_w",
-         "body_pos_w","body_quat_w","body_lin_vel_w","body_ang_vel_w",
-         "fps","framerate","joint_vel"} - keys
-      ),
-      "_auto_extracted": auto_extracted,
-    }
+@app.route("/load_motion_by_path", methods=["POST"])
+def load_motion_by_path():
+  body = request.json or {}
+  path = (body.get("path") or "").strip()
+  if not path:
+    return jsonify({"error": "path required"}), 400
+  path = os.path.expanduser(path)
+  if not os.path.isfile(path):
+    return jsonify({"error": f"not a file: {path}"}), 400
+  try:
+    data = np.load(path, allow_pickle=False)
+    resp = _build_motion_response(data)
+    resp["_loaded_path"] = os.path.abspath(path)
+    resp["_loaded_name"] = os.path.basename(path)
     return jsonify(resp)
   except Exception as e:
     import traceback
@@ -183,105 +274,6 @@ def save_motion():
     )
   except Exception as e:
     print(f"save error: {e}")
-    return jsonify({"error": str(e)}), 500
-
-
-# --------------------------- floor contact --------------------------------
-
-_model_cache: dict = {}
-
-
-def _get_model(xml_path: str):
-  if xml_path in _model_cache:
-    return _model_cache[xml_path]
-  import mujoco
-
-  m = mujoco.MjModel.from_xml_path(xml_path)
-  _model_cache[xml_path] = m
-  return m
-
-
-@app.route("/check_floor_contact", methods=["POST"])
-def check_floor_contact():
-  """Per-frame FK → lowest world-z of left/right hand_collision + elbow_collision.
-
-  Expects JSON:
-    {
-      "xml_path": "<abs or relative path>",
-      "joint_names": [...],
-      "joint_pos": [[...],...],
-      "base_pos_w": [[x,y,z],...], "base_quat_w": [[w,x,y,z],...]
-    }
-  """
-  try:
-    import mujoco
-  except ImportError:
-    return jsonify({"error": "mujoco not installed"}), 500
-
-  try:
-    req = request.json or {}
-    xml_path = req.get("xml_path", "static/M2v6/scene_M2v6_with_floor.xml")
-    if not os.path.isabs(xml_path):
-      xml_path = os.path.abspath(xml_path)
-    if not os.path.isfile(xml_path):
-      return jsonify({"error": f"xml not found: {xml_path}"}), 400
-
-    model = _get_model(xml_path)
-    data = mujoco.MjData(model)
-
-    mj_joints = [
-      model.joint(j).name
-      for j in range(model.njnt)
-      if model.jnt_type[j] != mujoco.mjtJoint.mjJNT_FREE
-    ]
-    src_jn = {n: i for i, n in enumerate(req["joint_names"])}
-    jp_in = np.asarray(req["joint_pos"], dtype=np.float64)
-    T = jp_in.shape[0]
-    jp = np.zeros((T, len(mj_joints)))
-    for di, n in enumerate(mj_joints):
-      if n in src_jn:
-        jp[:, di] = jp_in[:, src_jn[n]]
-    bp = np.asarray(req["base_pos_w"], dtype=np.float64)
-    bq = np.asarray(req["base_quat_w"], dtype=np.float64)
-
-    checks = {
-      "left_hand": "left_hand_collision",
-      "right_hand": "right_hand_collision",
-      "left_elbow": "left_elbow_collision",
-      "right_elbow": "right_elbow_collision",
-    }
-    gids = {}
-    for key, gname in checks.items():
-      gid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, gname)
-      if gid >= 0:
-        gids[key] = gid
-
-    def lowest_z(gid):
-      c = data.geom_xpos[gid]
-      mat = data.geom_xmat[gid].reshape(3, 3)
-      gt = model.geom_type[gid]
-      if gt in (mujoco.mjtGeom.mjGEOM_CAPSULE, mujoco.mjtGeom.mjGEOM_CYLINDER):
-        hl = model.geom_size[gid, 1]
-        r = model.geom_size[gid, 0]
-        return float(min(c[2] + mat[2, 2] * hl, c[2] - mat[2, 2] * hl) - r)
-      if gt == mujoco.mjtGeom.mjGEOM_SPHERE:
-        return float(c[2] - model.geom_size[gid, 0])
-      return float(c[2])
-
-    out: dict = {k: [] for k in gids}
-    hand_min: list = []
-    for t in range(T):
-      data.qpos[:] = np.concatenate([bp[t], bq[t], jp[t]])
-      mujoco.mj_forward(model, data)
-      row = {k: lowest_z(gid) for k, gid in gids.items()}
-      for k, v in row.items():
-        out[k].append(v)
-      hand_min.append(min(row.get("left_hand", 99), row.get("right_hand", 99)))
-
-    return jsonify({"geoms": out, "hand_min_z": hand_min})
-  except Exception as e:
-    import traceback
-    traceback.print_exc()
     return jsonify({"error": str(e)}), 500
 
 

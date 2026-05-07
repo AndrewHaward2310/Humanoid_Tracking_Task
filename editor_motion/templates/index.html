@@ -15,6 +15,9 @@
     box-shadow:0 4px 15px rgba(0,0,0,0.3); z-index:100;
     display:flex; flex-direction:column; gap:8px; user-select:text;
   }
+  /* When the curve editor is open at the bottom, shrink the sidebar so they don't overlap. */
+  body.motion-active #sidebar { max-height:calc(62vh - 20px); }
+  body.motion-active #ctrlPanel { max-height:calc(62vh - 20px); overflow-y:auto; }
   /* Collapsible section headers */
   details > summary.section-label { margin-top:4px; }
   details > summary.section-label::-webkit-details-marker { display:none; }
@@ -24,7 +27,8 @@
     margin-top:8px; border-bottom:1px solid #ddd; padding-bottom:2px;
   }
   #jointListContainer {
-    max-height:260px; overflow-y:auto; border:1px solid #ccc; background:#f9f9f9;
+    max-height:260px; min-height:120px; overflow-y:auto; flex-shrink:0;
+    border:1px solid #ccc; background:#f9f9f9;
   }
   .joint-item {
     padding:5px 6px; cursor:pointer; font-size:11px; border-bottom:1px solid #eee;
@@ -34,9 +38,10 @@
   .joint-item .mini { float:right; color:#888; font-size:10px; }
   .joint-item.active .mini { color:#ddeeff; }
 
-  input[type=text], input[type=number] {
+  input[type=text], input[type=number], select {
     width:100%; box-sizing:border-box; padding:5px; margin-bottom:3px;
     font-size:12px; border:1px solid #bbb; border-radius:3px;
+    background:#fff; color:#222;
   }
   button {
     padding:6px; cursor:pointer; background:#007bff; color:white;
@@ -173,6 +178,35 @@
   /* Preset row */
   #presetRow { display:flex; gap:4px; margin-top:3px; }
   #presetRow button { flex:1; font-size:10px; padding:3px 2px; }
+
+  /* Folder browser */
+  #folderFileList {
+    border:1px solid #ccc; background:#f9f9f9; max-height:180px; overflow-y:auto;
+    border-radius:3px; display:none;
+  }
+  .folder-item {
+    padding:4px 6px; cursor:pointer; font-size:11px; border-bottom:1px solid #eee;
+    display:flex; gap:6px; align-items:center;
+  }
+  .folder-item:last-child { border-bottom:none; }
+  .folder-item:hover { background:#eef; }
+  .folder-item.active { background:#007bff; color:white; }
+  .folder-item .fname { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .folder-item .fsize { color:#888; font-size:9px; }
+  .folder-item.active .fsize { color:#ddeeff; }
+
+  /* Play/Pause button */
+  #playPauseBtn {
+    flex:none; padding:2px 8px; font-size:13px; line-height:1;
+    background:#28a745; color:white; border:none; border-radius:10px; cursor:pointer;
+  }
+  #playPauseBtn:hover { background:#1e7e34; }
+  #playPauseBtn.playing { background:#dc3545; }
+  #playPauseBtn.playing:hover { background:#a71d2a; }
+  #playSpeed {
+    flex:none; width:46px; padding:1px 3px; margin:0; font-size:10px;
+    border:1px solid #bbb; border-radius:3px;
+  }
 </style>
 <script type="importmap">
 {
@@ -190,12 +224,29 @@
 <div id="sidebar">
   <h3 style="margin:0; text-align:center;">Motion Editor v3</h3>
 
-  <input type="text" id="urdfName" value="M2v6/urdf/Motion2_v2-2.urdf"
-         placeholder="urdf path under static/">
+  <select id="urdfName" title="Robot folders auto-detected in static/">
+    <option value="">(scanning static/…)</option>
+  </select>
   <button id="loadUrdfBtn">1. Load URDF</button>
 
   <input type="file" id="npzInput" accept=".npz">
   <small id="statusMsg" style="color:#666;">No motion</small>
+
+  <!-- ── Folder Browser ── -->
+  <details id="folderDetails">
+    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
+      <span style="flex:1;">📂 Folder Quick-Load</span><span style="font-weight:normal; font-size:10px; color:#999;">▼</span>
+    </summary>
+    <div style="display:flex; flex-direction:column; gap:4px; margin-top:6px;">
+      <input type="text" id="folderPath" placeholder="absolute path or ~/path/to/folder">
+      <div class="row" style="display:flex; gap:4px;">
+        <button id="openFolderBtn" class="warning" style="flex:1;">Open</button>
+        <button id="refreshFolderBtn" class="sec" style="flex:none; padding:6px 8px;" title="Refresh list">↻</button>
+      </div>
+      <div id="folderFileList"></div>
+      <small id="folderStatusMsg" style="color:#666;">no folder open</small>
+    </div>
+  </details>
 
   <!-- Auto-extract notice (hidden by default) -->
   <div id="autoExtractBanner" style="display:none; background:#fff3cd; color:#856404;
@@ -208,6 +259,10 @@
   <div id="jointListContainer"></div>
   <button id="smoothAllBtn" class="warning" style="margin-top:2px;">
     Smooth Current Curve (all frames)
+  </button>
+
+  <button id="saveBtn" class="success" style="margin-top:4px;">
+    Download NPZ
   </button>
 
   <!-- ── Improvement Pipeline ── -->
@@ -233,10 +288,6 @@
     <div id="diagPanel">No diagnostics yet — run Preview.</div>
   </details>
 
-  <button id="saveBtn" class="success" style="margin-top:4px;">
-    Download NPZ
-  </button>
-
   <!-- ── Trim Frames (collapsible) ── -->
   <details id="trimDetails">
     <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
@@ -260,19 +311,6 @@
         <button id="applyTrimBtn" class="danger" title="Trim in memory (irreversible)">Apply Trim</button>
         <button id="exportTrimBtn" class="success" title="Download trimmed NPZ without changing editor">Export</button>
       </div>
-    </div>
-  </details>
-
-  <!-- ── Floor check (collapsible) ── -->
-  <details id="floorDetails">
-    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
-      <span style="flex:1;">⚡ Floor Check (FK)</span><span style="font-weight:normal; font-size:10px; color:#999;">▼</span>
-    </summary>
-    <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
-      <input type="text" id="xmlPath" value="static/M2v6/M2v6.xml"
-             placeholder="MuJoCo XML for FK">
-      <button id="checkFloorBtn" class="warning">Check Floor Contact</button>
-      <small id="floorStatus" style="color:#666;">not checked</small>
     </div>
   </details>
 
@@ -357,6 +395,12 @@
     <button id="rangeClear" class="sec">Clear</button>
   </div>
   <div id="timelineWrapper">
+    <button id="playPauseBtn" title="Play/Pause (Space)">▶</button>
+    <input id="playSpeed" type="number" step="0.1" min="0.1" max="8" value="1"
+           title="Playback speed multiplier">
+    <label style="font-size:10px; color:#555; display:flex; align-items:center; gap:2px;">
+      <input type="checkbox" id="playLoop" checked style="margin:0;">loop
+    </label>
     <span>Frame</span>
     <input type="range" id="timelineSlider" min="0" max="100" value="0">
     <span id="timelineFrameNum">0</span>
@@ -385,11 +429,15 @@ let rangeB = -1;
 let keyframes = { K1: -1, K2: -1 };
 let clipboardVal = null;
 
-let floorData = null;      // { hand_min_z: [...], geoms: {...} }
-
 // Trim state
 let trimS = -1;            // -1 = not set
 let trimE = -1;
+
+// Playback state
+let isPlaying = false;
+let playAnchorTime = 0;     // performance.now() reference
+let playAnchorFrame = 0;    // currentFrame when playback (re)started
+let lastPlayUiUpdate = 0;   // throttle for slider/label/curve redraw
 
 // Undo/Redo
 const UNDO_LIMIT = 30;
@@ -569,18 +617,6 @@ function drawCurve() {
         if (f >= 0 && f < count) {
           ctx.fillRect(getX(f) - 1, editorH - PAD.bottom - tickH * 2 - 1, 2, tickH);
         }
-      }
-    }
-  }
-
-  // Floor-contact background (red bars under frames with hand below floor)
-  if (floorData && floorData.hand_min_z && activeType === 'joint') {
-    const hmz = floorData.hand_min_z;
-    ctx.fillStyle = 'rgba(220,50,50,0.15)';
-    for (let i = 0; i < count; i++) {
-      if (hmz[i] !== undefined && hmz[i] < 0) {
-        const x = getX(i) - stepX / 2;
-        ctx.fillRect(x, PAD.top, stepX, drawH);
       }
     }
   }
@@ -1067,42 +1103,6 @@ document.getElementById('exportTrimBtn').onclick = async () => {
 };
 
 // =========================================================
-//  Floor contact check
-// =========================================================
-document.getElementById('checkFloorBtn').onclick = async () => {
-  if (!motionData) return flash('load motion first');
-  const btn = document.getElementById('checkFloorBtn');
-  btn.disabled = true; btn.innerText = 'Checking…';
-  try {
-    const res = await fetch('/check_floor_contact', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        xml_path: document.getElementById('xmlPath').value,
-        joint_names: motionData.joint_names,
-        joint_pos: motionData.joint_pos,
-        base_pos_w: motionData.base_pos_w,
-        base_quat_w: motionData.base_quat_w,
-      })
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    floorData = data;
-    const bad = data.hand_min_z.filter(z => z < 0).length;
-    const mn = Math.min(...data.hand_min_z);
-    document.getElementById('floorStatus').innerText =
-      `${bad} frames below floor · min hand z = ${mn.toFixed(3)} m`;
-    document.getElementById('floorStatus').style.color = bad ? '#c00' : '#080';
-    drawCurve();
-    flash(`floor check done: ${bad} bad frames`);
-  } catch (err) {
-    flash('floor check failed: ' + err.message);
-  } finally {
-    btn.disabled = false; btn.innerText = 'Check Floor Contact';
-  }
-};
-
-// =========================================================
 //  3D scene
 // =========================================================
 const scene = new THREE.Scene();
@@ -1123,25 +1123,32 @@ controls.enableDamping = true;
 let robot = null;
 const jointsMap = {};
 
+// Light-weight pose update used during playback (no DOM/canvas work).
+function poseRobotFast(f) {
+  if (!robot || !motionData) return;
+  if (motionData.base_pos_w) {
+    const p = motionData.base_pos_w[f];
+    robot.position.set(p[0], p[1], p[2]);
+  }
+  if (motionData.base_quat_w) {
+    const q = motionData.base_quat_w[f];
+    robot.quaternion.set(q[1], q[2], q[3], q[0]);
+  }
+  const val = motionData.joint_pos[f];
+  const names = motionData.joint_names;
+  for (let i = 0; i < names.length; i++) {
+    const j = jointsMap[names[i]];
+    if (j) j.setJointValue(val[i]);
+  }
+}
+
 function update3DRobot(f) {
   currentFrame = Math.max(0, Math.min(motionData.num_frames - 1, f));
   document.getElementById('frameDisplay').innerText = currentFrame;
   document.getElementById('timelineFrameNum').innerText = currentFrame;
   const slider = document.getElementById('timelineSlider');
   slider.value = currentFrame;
-  if (!robot) return;
-  if (motionData.base_pos_w) {
-    const p = motionData.base_pos_w[currentFrame];
-    robot.position.set(p[0], p[1], p[2]);
-  }
-  if (motionData.base_quat_w) {
-    const q = motionData.base_quat_w[currentFrame];
-    robot.quaternion.set(q[1], q[2], q[3], q[0]);
-  }
-  const val = motionData.joint_pos[currentFrame];
-  motionData.joint_names.forEach((n, i) => {
-    if (jointsMap[n]) jointsMap[n].setJointValue(val[i]);
-  });
+  poseRobotFast(currentFrame);
   syncCtrlPanel();
 }
 
@@ -1159,11 +1166,18 @@ window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
     redo(); e.preventDefault(); return;
   }
+  if (e.key === ' ' && !inTextField) {
+    togglePlayback();
+    e.preventDefault();
+    return;
+  }
   if (e.key === 'ArrowLeft' && !inTextField) {
+    stopPlayback();
     if (!e.repeat) { update3DRobot(currentFrame - 1); drawCurve(); }
     e.preventDefault();
   }
   if (e.key === 'ArrowRight' && !inTextField) {
+    stopPlayback();
     if (!e.repeat) { update3DRobot(currentFrame + 1); drawCurve(); }
     e.preventDefault();
   }
@@ -1180,6 +1194,37 @@ function animate() {
   requestAnimationFrame(animate);
   controls.update();
   renderer.render(scene, camera);
+  if (isPlaying && motionData) {
+    const fps = (motionData.fps || motionData.framerate || 30);
+    const speed = parseFloat(document.getElementById('playSpeed').value) || 1;
+    const now = performance.now();
+    const elapsed = (now - playAnchorTime) / 1000;
+    let f = playAnchorFrame + Math.round(elapsed * fps * speed);
+    const N = motionData.num_frames;
+    if (f >= N) {
+      if (document.getElementById('playLoop').checked) {
+        f = f % N;
+        playAnchorTime = now;
+        playAnchorFrame = f;
+      } else {
+        f = N - 1;
+        stopPlayback();
+      }
+    }
+    if (f !== currentFrame) {
+      // Hot path: pose the robot every animation frame for smooth motion.
+      poseRobotFast(f);
+      currentFrame = f;
+      // Cold path: update slider/labels/curve at ~12Hz to avoid CPU stalls.
+      if (now - lastPlayUiUpdate > 80) {
+        lastPlayUiUpdate = now;
+        document.getElementById('frameDisplay').innerText = f;
+        document.getElementById('timelineFrameNum').innerText = f;
+        document.getElementById('timelineSlider').value = f;
+        drawCurve();
+      }
+    }
+  }
   if (motionData && activeIndex >= 0 && (keyStates.up || keyStates.down)) {
     if (!nudgeHeld) { pushUndo(); nudgeHeld = true; }
     const step = (activeType === 'pos') ? 0.002 : 0.01;
@@ -1193,18 +1238,94 @@ function animate() {
 animate();
 
 // =========================================================
+//  Playback controls
+// =========================================================
+function startPlayback() {
+  if (!motionData) return;
+  isPlaying = true;
+  // If at end, rewind to start
+  if (currentFrame >= motionData.num_frames - 1) {
+    update3DRobot(0); drawCurve();
+  }
+  playAnchorTime = performance.now();
+  playAnchorFrame = currentFrame;
+  const btn = document.getElementById('playPauseBtn');
+  btn.innerText = '⏸';
+  btn.classList.add('playing');
+  btn.title = 'Pause (Space)';
+}
+
+function stopPlayback() {
+  if (!isPlaying) {
+    const btn = document.getElementById('playPauseBtn');
+    btn.innerText = '▶';
+    btn.classList.remove('playing');
+    btn.title = 'Play (Space)';
+    return;
+  }
+  isPlaying = false;
+  const btn = document.getElementById('playPauseBtn');
+  btn.innerText = '▶';
+  btn.classList.remove('playing');
+  btn.title = 'Play (Space)';
+  // Final sync: refresh slider/labels/curve to the exact resting frame.
+  if (motionData) { update3DRobot(currentFrame); drawCurve(); }
+}
+
+function togglePlayback() {
+  if (isPlaying) stopPlayback(); else startPlayback();
+}
+
+document.getElementById('playPauseBtn').onclick = togglePlayback;
+document.getElementById('playSpeed').addEventListener('input', () => {
+  if (isPlaying) {
+    // Re-anchor so speed change doesn't jump
+    playAnchorTime = performance.now();
+    playAnchorFrame = currentFrame;
+  }
+});
+
+// =========================================================
 //  Timeline slider
 // =========================================================
 document.getElementById('timelineSlider').addEventListener('input', (e) => {
+  stopPlayback();
   update3DRobot(parseInt(e.target.value)); drawCurve();
 });
 
 // =========================================================
 //  URDF load
 // =========================================================
+// Populate robot dropdown from static/ scan
+(async () => {
+  try {
+    const res = await fetch('/robots');
+    const data = await res.json();
+    const sel = document.getElementById('urdfName');
+    sel.innerHTML = '';
+    if (!data.robots?.length) {
+      sel.innerHTML = '<option value="">(no URDFs found in static/)</option>';
+      return;
+    }
+    data.robots.forEach(r => {
+      r.all.forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u;
+        opt.innerText = `${r.name} — ${u.split('/').pop()}`;
+        sel.appendChild(opt);
+      });
+    });
+    const saved = localStorage.getItem('editor_motion.last_urdf');
+    if (saved && [...sel.options].some(o => o.value === saved)) sel.value = saved;
+  } catch (e) {
+    console.warn('list_robots failed', e);
+  }
+})();
+
 document.getElementById('loadUrdfBtn').onclick = () => {
   const name = document.getElementById('urdfName').value.trim();
-  if (!name) return alert('Enter URDF path');
+  if (!name) return alert('Select a robot');
+  try { localStorage.setItem('editor_motion.last_urdf', name); } catch (_) {}
   new URDFLoader().load(`/static/${name}`, r => {
     if (robot) scene.remove(robot);
     robot = r; scene.add(robot);
@@ -1217,6 +1338,74 @@ document.getElementById('loadUrdfBtn').onclick = () => {
 // =========================================================
 //  NPZ load
 // =========================================================
+function applyMotionResponse(data) {
+  motionData = data;
+
+  if (data._auto_extracted && data._auto_extracted.length) {
+    console.info('Auto-extracted fields:', data._auto_extracted);
+    document.getElementById('autoExtractList').innerText = data._auto_extracted.join(', ');
+    document.getElementById('autoExtractBanner').style.display = 'block';
+  } else {
+    document.getElementById('autoExtractBanner').style.display = 'none';
+  }
+  if (data._missing_keys && data._missing_keys.length) {
+    console.warn('NPZ missing keys (filled with defaults):', data._missing_keys);
+  }
+  const autoMsg = data._auto_extracted?.length
+    ? `loaded ⚡ auto: ${data._auto_extracted.join(', ')}`
+    : 'loaded';
+  flash(autoMsg);
+
+  stopPlayback();
+  currentFrame = 0;
+  undoStack.length = 0; redoStack.length = 0;
+  rangeA = -1; rangeB = -1; hideRangeToolbar();
+  keyframes = { K1: -1, K2: -1 };
+  trimS = -1; trimE = -1;
+  previewBackup = null;
+  document.getElementById('previewBanner').style.display = 'none';
+  document.getElementById('diagPanel').innerText = 'No diagnostics yet — run Preview.';
+  fetchRobotLimits();
+  document.getElementById('k1Frame').innerText = '—';
+  document.getElementById('k2Frame').innerText = '—';
+  document.getElementById('trimStart').value = 0;
+  document.getElementById('trimEnd').value = data.num_frames - 1;
+  document.getElementById('trimInfo').innerText = `0 → ${data.num_frames - 1}  (${data.num_frames} frames)`;
+  const fileLabel = data._loaded_name ? ` — ${data._loaded_name}` : '';
+  document.getElementById('statusMsg').innerText =
+    `${data.num_frames} frames @ ${data.fps} fps${fileLabel}`;
+  document.getElementById('curveEditor').style.display = 'block';
+  document.getElementById('ctrlPanel').style.display = 'flex';
+  document.body.classList.add('motion-active');
+
+  const slider = document.getElementById('timelineSlider');
+  slider.max = data.num_frames - 1;
+  slider.value = 0;
+
+  const list = document.getElementById('jointListContainer');
+  list.innerHTML = '';
+  const addHeader = (t) => { const d = document.createElement('div'); d.className = 'section-label'; d.innerText = t; list.appendChild(d); };
+  const addItem = (n, t, i, s = false) => {
+    const div = document.createElement('div');
+    div.className = 'joint-item' + (s ? ' special' : '');
+    div.innerHTML = `${n}<span class="mini">${t}[${i}]</span>`;
+    div.onclick = () => selectChannel(t, i, n, div);
+    list.appendChild(div);
+  };
+  addHeader('Base Position');
+  addItem('Base X', 'pos', 0, true); addItem('Base Y', 'pos', 1, true); addItem('Base Z', 'pos', 2, true);
+  addHeader('Base Rotation');
+  addItem('Roll', 'rot', 0, true); addItem('Pitch', 'rot', 1, true); addItem('Yaw', 'rot', 2, true);
+  addHeader('Joints');
+  data.joint_names.forEach((n, i) => addItem(n, 'joint', i));
+
+  if (data.joint_names.length) {
+    selectChannel('joint', 0, data.joint_names[0], list.querySelectorAll('.joint-item')[6]);
+  }
+  update3DRobot(0);
+  setTimeout(resizeEditor, 50);
+}
+
 document.getElementById('npzInput').addEventListener('change', async (e) => {
   if (!robot) return alert('Load URDF first');
   const file = e.target.files[0];
@@ -1228,74 +1417,107 @@ document.getElementById('npzInput').addEventListener('change', async (e) => {
     const res = await fetch('/upload_motion', { method: 'POST', body: fd });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    motionData = data;
-
-    // Auto-extract notice
-    if (data._auto_extracted && data._auto_extracted.length) {
-      console.info('Auto-extracted fields:', data._auto_extracted);
-      document.getElementById('autoExtractList').innerText = data._auto_extracted.join(', ');
-      document.getElementById('autoExtractBanner').style.display = 'block';
-    } else {
-      document.getElementById('autoExtractBanner').style.display = 'none';
-    }
-    if (data._missing_keys && data._missing_keys.length) {
-      console.warn('NPZ missing keys (filled with defaults):', data._missing_keys);
-    }
-    const autoMsg = data._auto_extracted?.length
-      ? `loaded ⚡ auto: ${data._auto_extracted.join(', ')}`
-      : 'loaded';
-    flash(autoMsg);
-
-    undoStack.length = 0; redoStack.length = 0;
-    floorData = null;
-    rangeA = -1; rangeB = -1; hideRangeToolbar();
-    keyframes = { K1: -1, K2: -1 };
-    trimS = -1; trimE = -1;
-    previewBackup = null;
-    document.getElementById('previewBanner').style.display = 'none';
-    document.getElementById('diagPanel').innerText = 'No diagnostics yet — run Preview.';
-    fetchRobotLimits();
-    document.getElementById('k1Frame').innerText = '—';
-    document.getElementById('k2Frame').innerText = '—';
-    document.getElementById('trimStart').value = 0;
-    document.getElementById('trimEnd').value = data.num_frames - 1;
-    document.getElementById('trimInfo').innerText = `0 → ${data.num_frames - 1}  (${data.num_frames} frames)`;
-    document.getElementById('statusMsg').innerText = `${data.num_frames} frames @ ${data.fps} fps`;
-    document.getElementById('curveEditor').style.display = 'block';
-    document.getElementById('ctrlPanel').style.display = 'flex';
-
-    const slider = document.getElementById('timelineSlider');
-    slider.max = data.num_frames - 1;
-    slider.value = 0;
-
-    const list = document.getElementById('jointListContainer');
-    list.innerHTML = '';
-    const addHeader = (t) => { const d = document.createElement('div'); d.className = 'section-label'; d.innerText = t; list.appendChild(d); };
-    const addItem = (n, t, i, s = false) => {
-      const div = document.createElement('div');
-      div.className = 'joint-item' + (s ? ' special' : '');
-      div.innerHTML = `${n}<span class="mini">${t}[${i}]</span>`;
-      div.onclick = () => selectChannel(t, i, n, div);
-      list.appendChild(div);
-    };
-    addHeader('Base Position');
-    addItem('Base X', 'pos', 0, true); addItem('Base Y', 'pos', 1, true); addItem('Base Z', 'pos', 2, true);
-    addHeader('Base Rotation');
-    addItem('Roll', 'rot', 0, true); addItem('Pitch', 'rot', 1, true); addItem('Yaw', 'rot', 2, true);
-    addHeader('Joints');
-    data.joint_names.forEach((n, i) => addItem(n, 'joint', i));
-
-    if (data.joint_names.length) {
-      selectChannel('joint', 0, data.joint_names[0], list.querySelectorAll('.joint-item')[6]);
-    }
-    update3DRobot(0);
-    setTimeout(resizeEditor, 50);
+    data._loaded_name = file.name;
+    applyMotionResponse(data);
+    setActiveFolderFile(null);
   } catch (err) {
     document.getElementById('statusMsg').innerText = 'ERROR: ' + err.message;
     document.getElementById('statusMsg').style.color = '#c00';
     alert('Upload failed: ' + err.message + '\nCheck browser console for details.');
   }
 });
+
+// =========================================================
+//  Folder Browser
+// =========================================================
+let activeFolderPath = null;
+
+function setActiveFolderFile(path) {
+  activeFolderPath = path;
+  document.querySelectorAll('.folder-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.path === path);
+  });
+}
+
+function fmtSize(n) {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024*1024) return `${(n/1024).toFixed(0)}K`;
+  return `${(n/1024/1024).toFixed(1)}M`;
+}
+
+async function openFolder(folder) {
+  folder = (folder || '').trim();
+  if (!folder) return alert('Enter a folder path first');
+  const status = document.getElementById('folderStatusMsg');
+  const list = document.getElementById('folderFileList');
+  status.innerText = 'loading…'; status.style.color = '#666';
+  try {
+    const res = await fetch(`/list_motions?dir=${encodeURIComponent(folder)}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    list.innerHTML = '';
+    if (!data.files.length) {
+      list.style.display = 'none';
+      status.innerText = `no .npz files in ${data.dir}`;
+      return;
+    }
+    data.files.forEach(f => {
+      const div = document.createElement('div');
+      div.className = 'folder-item';
+      div.dataset.path = f.path;
+      if (activeFolderPath === f.path) div.classList.add('active');
+      div.innerHTML = `<span class="fname" title="${f.path}">${f.name}</span>` +
+                      `<span class="fsize">${fmtSize(f.size)}</span>`;
+      div.onclick = () => loadMotionByPath(f.path, f.name);
+      list.appendChild(div);
+    });
+    list.style.display = 'block';
+    status.innerText = `${data.files.length} file(s) in ${data.dir}`;
+    document.getElementById('folderPath').value = data.dir;
+    try { localStorage.setItem('editor_motion.last_folder', data.dir); } catch (_) {}
+  } catch (err) {
+    list.style.display = 'none';
+    status.innerText = 'ERROR: ' + err.message;
+    status.style.color = '#c00';
+  }
+}
+
+document.getElementById('openFolderBtn').onclick = () => {
+  openFolder(document.getElementById('folderPath').value);
+};
+document.getElementById('refreshFolderBtn').onclick = () => {
+  openFolder(document.getElementById('folderPath').value);
+};
+document.getElementById('folderPath').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); openFolder(e.target.value); }
+});
+// Restore last folder
+try {
+  const last = localStorage.getItem('editor_motion.last_folder');
+  if (last) document.getElementById('folderPath').value = last;
+} catch (_) {}
+
+async function loadMotionByPath(path, name) {
+  if (!robot) return alert('Load URDF first');
+  document.getElementById('statusMsg').innerText = `loading ${name}…`;
+  document.getElementById('statusMsg').style.color = '#666';
+  try {
+    const res = await fetch('/load_motion_by_path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    applyMotionResponse(data);
+    setActiveFolderFile(path);
+    try { localStorage.setItem('editor_motion.last_loaded', path); } catch (_) {}
+  } catch (err) {
+    document.getElementById('statusMsg').innerText = 'ERROR: ' + err.message;
+    document.getElementById('statusMsg').style.color = '#c00';
+    alert('Load failed: ' + err.message);
+  }
+}
 
 function selectChannel(type, idx, name, el) {
   document.querySelectorAll('.joint-item').forEach(x => x.classList.remove('active'));
