@@ -1,6 +1,6 @@
 # editor_motion v1
 
-Web-based motion editor for humanoid robot motion data. Visualize, fix, smooth, trim, and crop motion files in `.npz` / `.csv` / `.pkl` formats — all in one tool, no install of GPU stack required.
+Web-based motion editor for humanoid robot motion data. Visualize, fix, smooth, and crop motion files in `.npz` / `.csv` / `.pkl` formats — all in one tool, no install of GPU stack required.
 
 > **Pipeline role:** sits between [`vm_retargeting`](../vm_retargeting) (produces robot motion from human pose) and [`mjlab`](../mjlab) (consumes refined motion for RL training). Use this tool to clean up retarget glitches before training.
 
@@ -13,8 +13,7 @@ Web-based motion editor for humanoid robot motion data. Visualize, fix, smooth, 
 - **▶️ Playback** — frame slider + time slider (toggleable) + Space to play, ←/→ to step, J/K/L (coming soon).
 - **📁 Multi-format I/O** — load and save **`.npz`**, **`.csv`** (vm_soma_retargeter format), **`.pkl`** (vm_retargeting format) interchangeably.
 - **📂 Folder Quick-Load** — point the tool at a folder; all `.npz/.csv/.pkl` files appear as one click-to-load list.
-- **✂ Trim (single range)** — clip motion in-place or export a single range without touching the editor state.
-- **✂✂ Crop (multi-segment)** — mark multiple segments and export them all as one ZIP containing every segment in every selected format (NPZ + CSV + PKL).
+- **✂ Crop (segments)** — mark one or more segments and export them. Single segment × single format downloads the file directly; multi-segment or multi-format produces a ZIP containing every segment × format combination (NPZ + CSV + PKL).
 - **📥 BVH import** — load a BVH and retarget to the current URDF (requires `soma_retargeter`; gracefully disabled otherwise).
 - **🛠 Improvement Pipeline** — chainable operators (`align_origin`, `foot_grounding`, `clamp_joint_limits`, `smooth`, `enforce_kinematic_limits`, `boundary_continuity`, `mirror`, `rederive_kinematics`, `diagnostics`).
 - **📊 Stats panel** — render FPS, current frame, time in seconds, motion fps, joint/body counts.
@@ -31,16 +30,18 @@ python app.py                             # http://127.0.0.1:5002
 
 Open the URL, pick a robot from the dropdown → **Load URDF**, then drop a `.npz/.csv/.pkl` into the file picker (or use Folder Quick-Load).
 
-## Workflow: crop a take into multiple training clips
+## Workflow: crop a take into one or more training clips
 
 1. Load the source motion (e.g. a long retargeted `.pkl`).
-2. Open **Scene Options → ✂✂ Crop (multi-segment)** at bottom-right.
+2. Open **Scene Options → ✂ Crop (segments)** at bottom-right.
 3. Scrub to the start frame of segment 1 → **Set Start (cur)**. Scrub to the end → **Set End (cur)** → **+ Add**. Repeat for each segment.
 4. Tick the format checkboxes (NPZ / CSV / PKL — any subset).
 5. Set a filename base (default `<input>_cropped`).
-6. **Export ZIP** — downloads `<base>_segments.zip` containing `<base>_seg<N>.<ext>` for each segment × format combination.
+6. **Export** —
+   - 1 segment × 1 format → downloads `<base>.<ext>` directly.
+   - otherwise → downloads `<base>_segments.zip` containing `<base>_seg<N>.<ext>` for each segment × format combination.
 
-The cropped curves render as green bands on the curve canvas so you can see the coverage at a glance.
+The cropped segments render as green bands on the curve canvas so you can see coverage at a glance. The button label flips between **Export** and **Export ZIP** depending on what you've selected.
 
 ## Format reference
 

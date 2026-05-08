@@ -58,7 +58,7 @@ Optional: `joint_vel`, `body_pos_w`, `body_quat_w`, `body_lin_vel_w`, `body_ang_
 2. **Curve editor** — HTML5 canvas for click-and-drag editing; range select, K1/K2 keyframes, smooth.
 3. **Sidebar** — Robot dropdown · Unified file input (3 formats) · Folder Quick-Load · Channels · Channel Editor · Improvement Pipeline.
 4. **Stats panel (top-right)** — Render FPS · Frame · Time · Motion FPS · Joints · Bodies.
-5. **Scene Options (bottom-right)** — Save NPZ/CSV/PKL · Trim (single range) · Crop (multi-segment ZIP) · Import BVH · Visibility toggles.
+5. **Scene Options (bottom-right)** — Save NPZ/CSV/PKL · Crop (single segment → file, multi-segment → ZIP) · Import BVH · Visibility toggles.
 
 ## Frontend dependencies
 

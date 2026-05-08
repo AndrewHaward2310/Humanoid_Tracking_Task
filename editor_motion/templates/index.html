@@ -29,6 +29,19 @@
   }
   * { user-select:none; }
 
+  /* === Custom scrollbars (match dark theme) === */
+  * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.14) transparent; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.10);
+    border-radius:4px;
+    border:1px solid rgba(0,0,0,0.25);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,184,77,0.45); }
+  ::-webkit-scrollbar-thumb:active { background: var(--accent); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
   /* Common panel base */
   .panel {
     background: var(--panel-bg); color: var(--text);
@@ -495,34 +508,10 @@
     <button id="sceneSavePkl" class="success" title="Save current motion as PKL">Save PKL</button>
   </div>
 
-  <!-- Trim (single range, in-place / export 1 file) -->
-  <details id="trimDetails" style="margin-top:6px;">
-    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
-      <span style="flex:1;">✂ Trim (single range)</span><span style="font-weight:normal; font-size:10px; color:var(--text-dim);">▼</span>
-    </summary>
-    <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
-      <div class="row">
-        <input type="number" id="trimStart" value="0" min="0" style="width:55px;" title="Start frame">
-        <button id="setTrimStartBtn" class="sec" style="font-size:10px;">◀ Start</button>
-        <button id="trimFromRangeBtn" class="sec" style="font-size:10px;" title="Set trim from range selection">⇥ Range</button>
-      </div>
-      <div class="row">
-        <input type="number" id="trimEnd" value="0" min="0" style="width:55px;" title="End frame">
-        <button id="setTrimEndBtn" class="sec" style="font-size:10px;">End ▶</button>
-        <button id="resetTrimBtn" class="sec" style="font-size:10px;">Reset</button>
-      </div>
-      <small id="trimInfo" style="color:var(--text-dim);">—</small>
-      <div class="row">
-        <button id="applyTrimBtn" class="danger" title="Trim in memory (irreversible)">Apply In-Place</button>
-        <button id="exportTrimBtn" class="success" title="Download trimmed NPZ without changing editor">Export Single</button>
-      </div>
-    </div>
-  </details>
-
-  <!-- Crop (multi-segment ZIP export) -->
+  <!-- Crop (single or multi-segment export) -->
   <details id="cropDetails" style="margin-top:6px;">
     <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
-      <span style="flex:1;">✂✂ Crop (multi-segment)</span><span style="font-weight:normal; font-size:10px; color:var(--text-dim);">▼</span>
+      <span style="flex:1;">✂ Crop (segments)</span><span style="font-weight:normal; font-size:10px; color:var(--text-dim);">▼</span>
     </summary>
     <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
       <div class="row">
@@ -624,10 +613,6 @@ let rangeA = -1;           // Shift+drag range start
 let rangeB = -1;
 let keyframes = { K1: -1, K2: -1 };
 let clipboardVal = null;
-
-// Trim state
-let trimS = -1;            // -1 = not set
-let trimE = -1;
 
 // Playback state
 let isPlaying = false;
@@ -845,36 +830,6 @@ function drawCurve() {
     const b = cropDraft.e > a ? cropDraft.e : a;
     ctx.fillStyle = 'rgba(255,184,77,0.20)';
     ctx.fillRect(getX(a) - stepX / 2, PAD.top, (b - a + 1) * stepX, drawH);
-  }
-
-  // Trim region shading
-  if (trimS >= 0 || trimE >= 0) {
-    const s = trimS >= 0 ? trimS : 0;
-    const e = trimE >= 0 ? trimE : count - 1;
-    // Dim outside trim region
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    if (s > 0) ctx.fillRect(PAD.left, PAD.top, (s / (count - 1)) * drawW, drawH);
-    if (e < count - 1) ctx.fillRect(getX(e), PAD.top, (count - 1 - e) * stepX + stepX, drawH);
-    // Trim start marker (green)
-    if (trimS >= 0) {
-      const x = getX(trimS);
-      ctx.beginPath(); ctx.strokeStyle = '#20c997'; ctx.lineWidth = 2;
-      ctx.setLineDash([3, 3]);
-      ctx.moveTo(x, PAD.top - 8); ctx.lineTo(x, editorH - PAD.bottom + 4);
-      ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = '#20c997'; ctx.font = 'bold 10px sans-serif';
-      ctx.fillText('TS', x + 2, PAD.top - 10);
-    }
-    // Trim end marker (orange-red)
-    if (trimE >= 0) {
-      const x = getX(trimE);
-      ctx.beginPath(); ctx.strokeStyle = '#e83e8c'; ctx.lineWidth = 2;
-      ctx.setLineDash([3, 3]);
-      ctx.moveTo(x, PAD.top - 8); ctx.lineTo(x, editorH - PAD.bottom + 4);
-      ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = '#e83e8c'; ctx.font = 'bold 10px sans-serif';
-      ctx.fillText('TE', x - 18, PAD.top - 10);
-    }
   }
 
   // Keyframe markers
@@ -1198,31 +1153,8 @@ document.getElementById('smoothAllBtn').onclick = () => {
 };
 
 // =========================================================
-//  Trim helpers
+//  Slice helper (used by crop)
 // =========================================================
-function updateTrimUI() {
-  if (!motionData) { document.getElementById('trimInfo').innerText = '—'; return; }
-  const T = motionData.num_frames;
-  const s = trimS >= 0 ? trimS : 0;
-  const e = trimE >= 0 ? trimE : T - 1;
-  document.getElementById('trimStart').value = s;
-  document.getElementById('trimEnd').value = e;
-  const count = e - s + 1;
-  const ok = count > 0 && s <= e;
-  const el = document.getElementById('trimInfo');
-  if (!ok) { el.style.color = '#c00'; el.innerText = 'invalid range'; }
-  else { el.style.color = '#666'; el.innerText = `${s} → ${e}  (${count} frames)`; }
-  drawCurve();
-}
-
-function _getTrimRange() {
-  const T = motionData ? motionData.num_frames : 0;
-  const s = Math.max(0, parseInt(document.getElementById('trimStart').value) || 0);
-  const eRaw = parseInt(document.getElementById('trimEnd').value);
-  const e = (!Number.isFinite(eRaw) || eRaw < 0) ? T - 1 : Math.min(eRaw, T - 1);
-  return { s, e, ok: s <= e && e - s + 1 > 0 };
-}
-
 function _sliceMotionData(md, s, e) {
   // Returns a NEW object with all arrays sliced [s..e] inclusive
   const sl = f => (Array.isArray(f) && f.length) ? f.slice(s, e + 1) : f;
@@ -1239,88 +1171,6 @@ function _sliceMotionData(md, s, e) {
     num_frames:     e - s + 1,
   };
 }
-
-document.getElementById('trimStart').addEventListener('input', () => {
-  trimS = parseInt(document.getElementById('trimStart').value);
-  updateTrimUI();
-});
-document.getElementById('trimEnd').addEventListener('input', () => {
-  trimE = parseInt(document.getElementById('trimEnd').value);
-  updateTrimUI();
-});
-document.getElementById('setTrimStartBtn').onclick = () => {
-  trimS = currentFrame;
-  if (trimE < 0 && motionData) trimE = motionData.num_frames - 1;
-  updateTrimUI(); flash(`Trim start: ${trimS}`);
-};
-document.getElementById('setTrimEndBtn').onclick = () => {
-  trimE = currentFrame;
-  if (trimS < 0) trimS = 0;
-  updateTrimUI(); flash(`Trim end: ${trimE}`);
-};
-document.getElementById('trimFromRangeBtn').onclick = () => {
-  if (rangeA < 0 || rangeB < 0) return flash('no range selected (Shift+drag on curve)');
-  trimS = Math.min(rangeA, rangeB);
-  trimE = Math.max(rangeA, rangeB);
-  updateTrimUI(); flash(`Trim from range: ${trimS}–${trimE}`);
-};
-document.getElementById('resetTrimBtn').onclick = () => {
-  trimS = -1; trimE = -1;
-  if (motionData) {
-    document.getElementById('trimStart').value = 0;
-    document.getElementById('trimEnd').value = motionData.num_frames - 1;
-  }
-  document.getElementById('trimInfo').innerText = '—';
-  drawCurve(); flash('trim reset');
-};
-
-document.getElementById('applyTrimBtn').onclick = () => {
-  if (!motionData) return flash('load motion first');
-  const { s, e, ok } = _getTrimRange();
-  if (!ok) return flash('invalid trim range');
-  const keep = e - s + 1;
-  if (keep === motionData.num_frames) return flash('nothing to trim');
-  if (!confirm(`Apply trim: keep frames ${s}–${e} (${keep} frames)?\nThis modifies the editor and cannot be undone.`)) return;
-  motionData = _sliceMotionData(motionData, s, e);
-  // Reset timeline
-  const slider = document.getElementById('timelineSlider');
-  slider.max = motionData.num_frames - 1;
-  document.getElementById('statusMsg').innerText = `${motionData.num_frames} frames @ ${motionData.fps} fps`;
-  undoStack.length = 0; redoStack.length = 0;
-  trimS = -1; trimE = -1;
-  updateTrimUI();
-  update3DRobot(0); drawCurve();
-  flash(`trimmed → ${motionData.num_frames} frames`);
-};
-
-document.getElementById('exportTrimBtn').onclick = async () => {
-  if (!motionData) return flash('load motion first');
-  const { s, e, ok } = _getTrimRange();
-  if (!ok) return flash('invalid trim range');
-  const btn = document.getElementById('exportTrimBtn');
-  btn.disabled = true; btn.innerText = 'exporting…';
-  try {
-    const sliced = _sliceMotionData(motionData, s, e);
-    const origName = (motionData._loaded_name
-      || document.getElementById('motionInput').files[0]?.name
-      || 'motion').replace(/\.(npz|csv|pkl)$/i, '');
-    sliced._filename = `${origName}_trim${s}-${e}`;
-    const res = await fetch('/save_motion', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sliced),
-    });
-    if (!res.ok) throw new Error('server error');
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${origName}_trim${s}-${e}.npz`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-    flash(`exported frames ${s}–${e}  (${e - s + 1} frames)`);
-  } catch (err) { flash('export failed: ' + err.message); }
-  finally { btn.disabled = false; btn.innerText = 'Export'; }
-};
 
 // =========================================================
 //  3D scene
@@ -1766,16 +1616,12 @@ function applyMotionResponse(data) {
   undoStack.length = 0; redoStack.length = 0;
   rangeA = -1; rangeB = -1; hideRangeToolbar();
   keyframes = { K1: -1, K2: -1 };
-  trimS = -1; trimE = -1;
   previewBackup = null;
   document.getElementById('previewBanner').style.display = 'none';
   document.getElementById('diagPanel').innerText = 'No diagnostics yet — run Preview.';
   fetchRobotLimits();
   document.getElementById('k1Frame').innerText = '—';
   document.getElementById('k2Frame').innerText = '—';
-  document.getElementById('trimStart').value = 0;
-  document.getElementById('trimEnd').value = data.num_frames - 1;
-  document.getElementById('trimInfo').innerText = `0 → ${data.num_frames - 1}  (${data.num_frames} frames)`;
   const fileLabel = data._loaded_name ? ` — ${data._loaded_name}` : '';
   document.getElementById('statusMsg').innerText =
     `${data.num_frames} frames @ ${data.fps} fps${fileLabel}`;
@@ -2029,6 +1875,7 @@ function _renderCropList() {
       const i = +b.getAttribute('data-seg-rm');
       cropSegments.splice(i, 1);
       _renderCropList();
+      _updateCropExportLabel();
       drawCurve();   // refresh segment overlay on canvas
     };
   });
@@ -2056,6 +1903,7 @@ document.getElementById('cropAddSeg').onclick = () => {
   cropSegments.push({ s: cropDraft.s, e: cropDraft.e });
   cropDraft = { s: -1, e: -1 };
   _renderCropDraft(); _renderCropList();
+  _updateCropExportLabel();
   drawCurve();
   flash(`segment ${cropSegments.length} added`);
 };
@@ -2064,8 +1912,31 @@ document.getElementById('cropClear').onclick = () => {
   cropSegments.length = 0;
   cropDraft = { s: -1, e: -1 };
   _renderCropDraft(); _renderCropList();
+  _updateCropExportLabel();
   drawCurve();
 };
+
+// Endpoint per single-format save (used when 1 seg × 1 fmt → no ZIP)
+const _SINGLE_SAVE_ENDPOINTS = { npz: '/save_motion', csv: '/save_csv', pkl: '/save_pkl' };
+
+function _setSingleSavePayloadName(payload, base, fmt) {
+  // /save_motion uses _filename (no ext); /save_csv & /save_pkl use _loaded_name (strip+replace ext).
+  if (fmt === 'npz') payload._filename = base;
+  else payload._loaded_name = `${base}.${fmt}`;
+}
+
+function _updateCropExportLabel() {
+  const btn = document.getElementById('cropExport');
+  if (!btn || btn.disabled) return;
+  const fmtCount =
+    (document.getElementById('cropFmtNpz').checked ? 1 : 0) +
+    (document.getElementById('cropFmtCsv').checked ? 1 : 0) +
+    (document.getElementById('cropFmtPkl').checked ? 1 : 0);
+  btn.innerText = (cropSegments.length === 1 && fmtCount === 1) ? 'Export' : 'Export ZIP';
+}
+['cropFmtNpz', 'cropFmtCsv', 'cropFmtPkl'].forEach(id => {
+  document.getElementById(id).addEventListener('change', _updateCropExportLabel);
+});
 
 document.getElementById('cropExport').onclick = async () => {
   if (!motionData) return alert('No motion loaded');
@@ -2080,8 +1951,31 @@ document.getElementById('cropExport').onclick = async () => {
   const base = baseInput || fallbackBase;
 
   const btn = document.getElementById('cropExport');
+  const restoreLabel = btn.innerText;
   btn.disabled = true; btn.innerText = 'exporting…';
   try {
+    // Fast path: single segment × single format → download the file directly (no ZIP).
+    if (cropSegments.length === 1 && formats.length === 1) {
+      const fmt = formats[0];
+      const seg = cropSegments[0];
+      const sliced = _sliceMotionData(motionData, seg.s, seg.e);
+      _setSingleSavePayloadName(sliced, base, fmt);
+      const res = await fetch(_SINGLE_SAVE_ENDPOINTS[fmt], {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sliced),
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(t.slice(0, 200)); }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${base}.${fmt}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      flash(`exported ${seg.e - seg.s + 1} frames → ${fmt}`);
+      return;
+    }
+    // Multi-segment or multi-format → server-side ZIP.
     const res = await fetch('/crop_segments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2105,13 +1999,15 @@ document.getElementById('cropExport').onclick = async () => {
   } catch (err) {
     alert('Export failed: ' + err.message);
   } finally {
-    btn.disabled = false; btn.innerText = 'Export ZIP';
+    btn.disabled = false; btn.innerText = restoreLabel;
+    _updateCropExportLabel();
   }
 };
 
 // Initial render so the empty state is visible
 _renderCropDraft();
 _renderCropList();
+_updateCropExportLabel();
 
 async function loadMotionByPath(path, name) {
   if (!robot) return alert('Load URDF first');

@@ -32,8 +32,14 @@ from motion_pipeline.limits import extract_limits, get_model as get_pipeline_mod
 
 app = Flask(__name__)
 
-if not os.path.exists("static"):
-  os.makedirs("static")
+# Anchor relative paths to this file's directory so the server works regardless
+# of the cwd it was launched from (e.g. `python editor_motion/app.py` from repo
+# root vs `cd editor_motion && python app.py`).
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+_STATIC_DIR = os.path.join(_APP_DIR, "static")
+
+if not os.path.exists(_STATIC_DIR):
+  os.makedirs(_STATIC_DIR)
 
 # ── Robot joint-name presets ────────────────────────────────────────────────
 _M2V6_JOINT_NAMES = [
@@ -181,7 +187,7 @@ def upload_motion():
 def list_robots():
   """List robots in static/. Each robot dir is expected to contain a top-level
   URDF in `<robot>/urdf/*.urdf` (linkage/sub-URDFs are ignored)."""
-  static_root = os.path.abspath("static")
+  static_root = _STATIC_DIR
   robots = []
   if not os.path.isdir(static_root):
     return jsonify({"robots": robots})
@@ -356,10 +362,32 @@ def _csv_header(joint_names: list[str]) -> list[str]:
   )
 
 
-def _parse_csv_text(text: str) -> dict:
-  """Parse vm_soma_retargeter-format CSV text into the editor's motion JSON.
+def _euler_xyz_deg_to_quat_wxyz(rx_deg: float, ry_deg: float, rz_deg: float) -> tuple[float, float, float, float]:
+  """Intrinsic XYZ Euler angles in degrees → quaternion [w, x, y, z]."""
+  rx, ry, rz = np.deg2rad([rx_deg, ry_deg, rz_deg])
+  cx, sx = np.cos(rx / 2), np.sin(rx / 2)
+  cy, sy = np.cos(ry / 2), np.sin(ry / 2)
+  cz, sz = np.cos(rz / 2), np.sin(rz / 2)
+  # XYZ intrinsic: q = qx * qy * qz
+  qw = cx * cy * cz - sx * sy * sz
+  qx = sx * cy * cz + cx * sy * sz
+  qy = cx * sy * cz - sx * cy * sz
+  qz = cx * cy * sz + sx * sy * cz
+  return float(qw), float(qx), float(qy), float(qz)
 
-  Header: Frame, root_translateX/Y/Z (cm), root_quatX/Y/Z/W, <joint_names...>
+
+def _parse_csv_text(text: str) -> dict:
+  """Parse a CSV motion file into the editor's motion JSON.
+
+  Two header variants are auto-detected:
+
+  • vm_soma_retargeter (default):
+      Frame, root_translateX/Y/Z (cm), root_quatX/Y/Z/W, <joint_names> (rad)
+
+  • unitree_g1 / LAFAN1 style:
+      Frame, root_translateX/Y/Z (cm), root_rotateX/Y/Z (deg, intrinsic XYZ Euler),
+      <joint_names ending in `_dof`> (deg)
+      → joint suffix `_dof` is stripped so joints match the URDF.
   """
   import csv as csv_mod
   lines = text.splitlines()
@@ -379,12 +407,26 @@ def _parse_csv_text(text: str) -> dict:
       return -1
 
   rt_idx = [col("root_translateX"), col("root_translateY"), col("root_translateZ")]
-  rq_idx = [col("root_quatX"), col("root_quatY"), col("root_quatZ"), col("root_quatW")]
-  if any(i < 0 for i in rt_idx + rq_idx):
-    raise ValueError("CSV missing root_translate*/root_quat* columns")
+  if any(i < 0 for i in rt_idx):
+    raise ValueError("CSV missing root_translateX/Y/Z columns")
 
-  last_root_col = max(rq_idx)
-  joint_names = header[last_root_col + 1:]
+  rq_idx = [col("root_quatX"), col("root_quatY"), col("root_quatZ"), col("root_quatW")]
+  rr_idx = [col("root_rotateX"), col("root_rotateY"), col("root_rotateZ")]
+  if all(i >= 0 for i in rq_idx):
+    root_mode = "quat"
+    last_root_col = max(rq_idx)
+  elif all(i >= 0 for i in rr_idx):
+    root_mode = "euler_xyz_deg"
+    last_root_col = max(rr_idx)
+  else:
+    raise ValueError("CSV missing root rotation columns: need root_quatX/Y/Z/W or root_rotateX/Y/Z")
+
+  raw_joint_names = header[last_root_col + 1:]
+  # LAFAN1-style: every joint column ends in `_dof` and values are degrees.
+  joints_in_degrees = bool(raw_joint_names) and all(n.endswith("_dof") for n in raw_joint_names)
+  joint_names = [n[:-len("_dof")] if joints_in_degrees and n.endswith("_dof") else n
+                 for n in raw_joint_names]
+
   T = len(body)
   nj = len(joint_names)
   jp = np.zeros((T, nj), dtype=np.float64)
@@ -394,12 +436,18 @@ def _parse_csv_text(text: str) -> dict:
     bp[ti] = [float(r[rt_idx[0]]) / 100.0,
               float(r[rt_idx[1]]) / 100.0,
               float(r[rt_idx[2]]) / 100.0]
-    qx = float(r[rq_idx[0]]); qy = float(r[rq_idx[1]])
-    qz = float(r[rq_idx[2]]); qw = float(r[rq_idx[3]])
-    bq[ti] = [qw, qx, qy, qz]
+    if root_mode == "quat":
+      qx = float(r[rq_idx[0]]); qy = float(r[rq_idx[1]])
+      qz = float(r[rq_idx[2]]); qw = float(r[rq_idx[3]])
+      bq[ti] = [qw, qx, qy, qz]
+    else:  # euler_xyz_deg
+      bq[ti] = _euler_xyz_deg_to_quat_wxyz(
+        float(r[rr_idx[0]]), float(r[rr_idx[1]]), float(r[rr_idx[2]]))
     for ji in range(nj):
       v = r[last_root_col + 1 + ji].strip() if last_root_col + 1 + ji < len(r) else ""
       jp[ti, ji] = float(v) if v else 0.0
+  if joints_in_degrees:
+    jp = np.deg2rad(jp)
 
   return _build_motion_response(_FakeNpz({
     "joint_pos": jp,
@@ -784,13 +832,13 @@ def upload_bvh():
 
 # --------------------------- pipeline -------------------------------------
 
-DEFAULT_XML = "static/M2v6/M2v6.xml"
+DEFAULT_XML = os.path.join(_STATIC_DIR, "M2v6", "M2v6.xml")
 
 
 def _resolve_xml(req_xml: str | None) -> str:
   xml_path = req_xml or DEFAULT_XML
   if not os.path.isabs(xml_path):
-    xml_path = os.path.abspath(xml_path)
+    xml_path = os.path.join(_APP_DIR, xml_path)
   return xml_path
 
 
