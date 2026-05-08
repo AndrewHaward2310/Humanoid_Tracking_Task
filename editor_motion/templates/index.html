@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Robot Motion Editor v3</title>
+<title>Robot Motion Editor v1</title>
 <style>
   /* ImGui-inspired dark theme */
   :root {
@@ -341,14 +341,15 @@
 
 <!-- LEFT: Load + channels -->
 <div id="sidebar">
-  <h3 style="margin:0; text-align:center;">Motion Editor v3</h3>
+  <h3 style="margin:0; text-align:center;">Motion Editor v1</h3>
 
   <select id="urdfName" title="Robot folders auto-detected in static/">
     <option value="">(scanning static/…)</option>
   </select>
   <button id="loadUrdfBtn">1. Load URDF</button>
 
-  <input type="file" id="npzInput" accept=".npz">
+  <input type="file" id="motionInput" accept=".npz,.csv,.pkl"
+         title="Load motion from .npz, .csv, or .pkl">
   <small id="statusMsg" style="color:#666;">No motion</small>
 
   <!-- ── Folder Browser ── -->
@@ -454,35 +455,8 @@
     <div id="diagPanel">No diagnostics yet — run Preview.</div>
   </details>
 
-  <!-- ── Trim Frames (collapsible) ── -->
-  <details id="trimDetails">
-    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
-      <span style="flex:1;">✂ Trim Frames</span><span style="font-weight:normal; font-size:10px; color:#999;">▼</span>
-    </summary>
-    <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
-      <div class="row">
-        <input type="number" id="trimStart" value="0" min="0"
-               style="width:55px; flex:none;" title="Start frame">
-        <button id="setTrimStartBtn" class="sec" style="font-size:10px;">◀ Start</button>
-        <button id="trimFromRangeBtn" class="sec" style="font-size:10px;" title="Set trim from range selection">⇥ Range</button>
-      </div>
-      <div class="row">
-        <input type="number" id="trimEnd" value="0" min="0"
-               style="width:55px; flex:none;" title="End frame">
-        <button id="setTrimEndBtn" class="sec" style="font-size:10px;">End ▶</button>
-        <button id="resetTrimBtn" class="sec" style="font-size:10px;">Reset</button>
-      </div>
-      <small id="trimInfo" style="color:#666;">—</small>
-      <div class="row">
-        <button id="applyTrimBtn" class="danger" title="Trim in memory (irreversible)">Apply Trim</button>
-        <button id="exportTrimBtn" class="success" title="Download trimmed NPZ without changing editor">Export</button>
-      </div>
-    </div>
-  </details>
-
-  <div style="font-size:10px; color:#666; margin-top:4px;">
-    <b>Keys:</b> ←/→ step frame | ↑/↓ nudge value | Shift+drag = range
-    | Ctrl+Z undo | Ctrl+Y redo
+  <div style="font-size:10px; color:var(--text-dim); margin-top:4px;">
+    <b>Keys:</b> Space play · ←/→ step · ↑/↓ nudge · Shift+drag range · Ctrl+Z/Y undo/redo
   </div>
 </div>
 
@@ -513,19 +487,76 @@
 <!-- BOTTOM-RIGHT: Scene Options panel -->
 <div id="sceneOptions">
   <div class="section-label">Motion</div>
+
+  <!-- Save current motion (full, no crop) — three formats -->
   <div class="row">
-    <button id="sceneSaveNpz" class="success">Save NPZ</button>
-    <button id="sceneSaveCsv" class="success">Save CSV</button>
+    <button id="sceneSaveNpz" class="success" title="Save current motion as NPZ">Save NPZ</button>
+    <button id="sceneSaveCsv" class="success" title="Save current motion as CSV">Save CSV</button>
+    <button id="sceneSavePkl" class="success" title="Save current motion as PKL">Save PKL</button>
   </div>
-  <div class="row">
-    <label class="sec" style="flex:1; text-align:center; cursor:pointer; padding:6px; border-radius:3px; background:#444851; color:#e0e0e0; font-size:11px; font-weight:600;">
-      Load CSV<input id="loadCsvInput" type="file" accept=".csv" style="display:none">
-    </label>
-    <label class="sec" style="flex:1; text-align:center; cursor:pointer; padding:6px; border-radius:3px; background:#444851; color:#e0e0e0; font-size:11px; font-weight:600;">
-      Load BVH<input id="loadBvhInput" type="file" accept=".bvh" style="display:none">
-    </label>
-  </div>
-  <small id="bvhStatus" style="font-size:10px;">BVH retarget target uses currently-loaded URDF.</small>
+
+  <!-- Trim (single range, in-place / export 1 file) -->
+  <details id="trimDetails" style="margin-top:6px;">
+    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
+      <span style="flex:1;">✂ Trim (single range)</span><span style="font-weight:normal; font-size:10px; color:var(--text-dim);">▼</span>
+    </summary>
+    <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+      <div class="row">
+        <input type="number" id="trimStart" value="0" min="0" style="width:55px;" title="Start frame">
+        <button id="setTrimStartBtn" class="sec" style="font-size:10px;">◀ Start</button>
+        <button id="trimFromRangeBtn" class="sec" style="font-size:10px;" title="Set trim from range selection">⇥ Range</button>
+      </div>
+      <div class="row">
+        <input type="number" id="trimEnd" value="0" min="0" style="width:55px;" title="End frame">
+        <button id="setTrimEndBtn" class="sec" style="font-size:10px;">End ▶</button>
+        <button id="resetTrimBtn" class="sec" style="font-size:10px;">Reset</button>
+      </div>
+      <small id="trimInfo" style="color:var(--text-dim);">—</small>
+      <div class="row">
+        <button id="applyTrimBtn" class="danger" title="Trim in memory (irreversible)">Apply In-Place</button>
+        <button id="exportTrimBtn" class="success" title="Download trimmed NPZ without changing editor">Export Single</button>
+      </div>
+    </div>
+  </details>
+
+  <!-- Crop (multi-segment ZIP export) -->
+  <details id="cropDetails" style="margin-top:6px;">
+    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
+      <span style="flex:1;">✂✂ Crop (multi-segment)</span><span style="font-weight:normal; font-size:10px; color:var(--text-dim);">▼</span>
+    </summary>
+    <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+      <div class="row">
+        <button id="cropSetStart" class="sec" style="font-size:10px;">Set Start (cur)</button>
+        <button id="cropSetEnd" class="sec" style="font-size:10px;">Set End (cur)</button>
+        <button id="cropAddSeg" class="warning" style="font-size:10px;">+ Add</button>
+      </div>
+      <small id="cropDraft" style="color:var(--text-dim);">draft: — / —</small>
+      <div id="cropSegList" style="border:1px solid var(--input-border); background:var(--input-bg); border-radius:3px; max-height:120px; overflow-y:auto; min-height:24px;"></div>
+      <div class="row" style="display:flex; gap:8px;">
+        <label class="toggle"><input type="checkbox" id="cropFmtNpz" checked>NPZ</label>
+        <label class="toggle"><input type="checkbox" id="cropFmtCsv" checked>CSV</label>
+        <label class="toggle"><input type="checkbox" id="cropFmtPkl" checked>PKL</label>
+      </div>
+      <input type="text" id="cropFilenameBase" placeholder="filename base (default: <motion>_cropped)">
+      <div class="row">
+        <button id="cropClear" class="sec">Clear All</button>
+        <button id="cropExport" class="success">Export ZIP</button>
+      </div>
+    </div>
+  </details>
+
+  <!-- BVH retarget (kept separate because it requires source→target retargeting) -->
+  <details id="bvhDetails" style="margin-top:6px;">
+    <summary class="section-label" style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:4px;">
+      <span style="flex:1;">📥 Import BVH (retarget)</span><span style="font-weight:normal; font-size:10px; color:var(--text-dim);">▼</span>
+    </summary>
+    <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+      <label class="sec" style="text-align:center; cursor:pointer; padding:6px; border-radius:3px; background:#444851; color:#e0e0e0; font-size:11px; font-weight:600;">
+        Choose BVH<input id="loadBvhInput" type="file" accept=".bvh" style="display:none">
+      </label>
+      <small id="bvhStatus" style="font-size:10px; color:var(--text-dim);">Target = currently-loaded URDF.</small>
+    </div>
+  </details>
 
   <div class="section-label">Visibility</div>
   <label class="toggle"><input type="checkbox" id="visFloor" checked>Show Floor Grid</label>
@@ -790,6 +821,29 @@ function drawCurve() {
   if (rangeA >= 0 && rangeB >= 0) {
     const a = Math.min(rangeA, rangeB), b = Math.max(rangeA, rangeB);
     ctx.fillStyle = 'rgba(0,123,255,0.18)';
+    ctx.fillRect(getX(a) - stepX / 2, PAD.top, (b - a + 1) * stepX, drawH);
+  }
+
+  // Crop segment bands (cyan, behind curve so the line stays visible)
+  if (typeof cropSegments !== 'undefined' && cropSegments.length) {
+    ctx.fillStyle = 'rgba(95,201,122,0.18)';
+    cropSegments.forEach(seg => {
+      const a = seg.s, b = seg.e;
+      ctx.fillRect(getX(a) - stepX / 2, PAD.top, (b - a + 1) * stepX, drawH);
+    });
+    // Numbered labels at top of each segment
+    ctx.fillStyle = '#9bdfa8';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    cropSegments.forEach((seg, i) => {
+      ctx.fillText(`#${i + 1}`, getX(seg.s) + 2, PAD.top + 12);
+    });
+  }
+  // Crop draft (lighter green, so user sees the half-marked range)
+  if (typeof cropDraft !== 'undefined' && cropDraft.s >= 0) {
+    const a = cropDraft.s;
+    const b = cropDraft.e > a ? cropDraft.e : a;
+    ctx.fillStyle = 'rgba(255,184,77,0.20)';
     ctx.fillRect(getX(a) - stepX / 2, PAD.top, (b - a + 1) * stepX, drawH);
   }
 
@@ -1247,8 +1301,9 @@ document.getElementById('exportTrimBtn').onclick = async () => {
   btn.disabled = true; btn.innerText = 'exporting…';
   try {
     const sliced = _sliceMotionData(motionData, s, e);
-    const origName = (document.getElementById('npzInput').files[0]?.name || 'motion')
-      .replace(/\.npz$/i, '');
+    const origName = (motionData._loaded_name
+      || document.getElementById('motionInput').files[0]?.name
+      || 'motion').replace(/\.(npz|csv|pkl)$/i, '');
     sliced._filename = `${origName}_trim${s}-${e}`;
     const res = await fetch('/save_motion', {
       method: 'POST',
@@ -1759,15 +1814,28 @@ function applyMotionResponse(data) {
   setTimeout(resizeEditor, 50);
 }
 
-document.getElementById('npzInput').addEventListener('change', async (e) => {
-  if (!robot) return alert('Load URDF first');
-  const file = e.target.files[0];
+// Map from file extension to upload endpoint. Unified file input dispatches
+// here so users can pick .npz / .csv / .pkl through one chooser.
+const _UPLOAD_ENDPOINTS = {
+  npz: '/upload_motion',
+  csv: '/upload_csv',
+  pkl: '/upload_pkl',
+};
+
+async function _handleMotionFile(file) {
   if (!file) return;
-  document.getElementById('statusMsg').innerText = 'uploading…';
-  document.getElementById('statusMsg').style.color = '#666';
+  if (!robot) return alert('Load URDF first');
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const url = _UPLOAD_ENDPOINTS[ext];
+  if (!url) {
+    alert(`Unsupported extension: .${ext}\nSupported: .npz, .csv, .pkl`);
+    return;
+  }
+  document.getElementById('statusMsg').innerText = `uploading ${file.name}…`;
+  document.getElementById('statusMsg').style.color = '#9aa0aa';
   const fd = new FormData(); fd.append('file', file);
   try {
-    const res = await fetch('/upload_motion', { method: 'POST', body: fd });
+    const res = await fetch(url, { method: 'POST', body: fd });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     data._loaded_name = file.name;
@@ -1776,8 +1844,13 @@ document.getElementById('npzInput').addEventListener('change', async (e) => {
   } catch (err) {
     document.getElementById('statusMsg').innerText = 'ERROR: ' + err.message;
     document.getElementById('statusMsg').style.color = '#c00';
-    alert('Upload failed: ' + err.message + '\nCheck browser console for details.');
+    alert(`Upload failed (${ext}): ${err.message}`);
   }
+}
+
+document.getElementById('motionInput').addEventListener('change', (e) => {
+  _handleMotionFile(e.target.files[0]);
+  e.target.value = '';   // allow re-picking same file
 });
 
 // =========================================================
@@ -1850,56 +1923,38 @@ try {
   if (last) document.getElementById('folderPath').value = last;
 } catch (_) {}
 
-// Scene Options: Save NPZ / Save CSV mirror the sidebar Download NPZ button
+// Scene Options: Save NPZ / CSV / PKL — three formats from current motion.
 document.getElementById('sceneSaveNpz').onclick = () => {
   document.getElementById('saveBtn').click();
 };
-document.getElementById('sceneSaveCsv').onclick = async () => {
+
+async function _saveMotionAs(endpoint, ext, btn) {
   if (!motionData) return alert('No motion loaded');
-  const btn = document.getElementById('sceneSaveCsv');
-  btn.disabled = true; btn.innerText = 'saving…';
+  btn.disabled = true; const orig = btn.innerText; btn.innerText = 'saving…';
   try {
-    const res = await fetch('/save_csv', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(motionData),
     });
-    if (!res.ok) {
-      const t = await res.text(); throw new Error(t.slice(0, 200));
-    }
+    if (!res.ok) { const t = await res.text(); throw new Error(t.slice(0, 200)); }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = (motionData._loaded_name || 'edited_motion').replace(/\.npz$/i, '') + '.csv';
+    a.download = (motionData._loaded_name || 'edited_motion').replace(/\.(npz|csv|pkl)$/i, '') + `.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
-    flash('CSV downloaded');
+    flash(`${ext.toUpperCase()} downloaded`);
   } catch (err) {
-    alert('Save CSV failed: ' + err.message);
+    alert(`Save ${ext.toUpperCase()} failed: ` + err.message);
   } finally {
-    btn.disabled = false; btn.innerText = 'Save CSV';
+    btn.disabled = false; btn.innerText = orig;
   }
-};
+}
 
-document.getElementById('loadCsvInput').addEventListener('change', async (e) => {
-  if (!robot) return alert('Load URDF first');
-  const file = e.target.files[0];
-  if (!file) return;
-  const fd = new FormData(); fd.append('file', file);
-  try {
-    const res = await fetch('/upload_csv', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    data._loaded_name = file.name;
-    applyMotionResponse(data);
-    setActiveFolderFile(null);
-  } catch (err) {
-    alert('CSV upload failed: ' + err.message);
-  } finally {
-    e.target.value = '';
-  }
-});
+document.getElementById('sceneSaveCsv').onclick = (e) => _saveMotionAs('/save_csv', 'csv', e.currentTarget);
+document.getElementById('sceneSavePkl').onclick = (e) => _saveMotionAs('/save_pkl', 'pkl', e.currentTarget);
 
 document.getElementById('loadBvhInput').addEventListener('change', async (e) => {
   if (!robot) return alert('Load URDF first');
@@ -1926,6 +1981,137 @@ document.getElementById('loadBvhInput').addEventListener('change', async (e) => 
     e.target.value = '';
   }
 });
+
+// =========================================================
+//  Crop multi-segment workflow
+// =========================================================
+let cropDraft = { s: -1, e: -1 };
+const cropSegments = [];   // [{s, e}, ...]
+
+function _renderCropDraft() {
+  const el = document.getElementById('cropDraft');
+  const s = cropDraft.s >= 0 ? cropDraft.s : '—';
+  const e = cropDraft.e >= 0 ? cropDraft.e : '—';
+  const dur = (cropDraft.s >= 0 && cropDraft.e > cropDraft.s)
+    ? ` (${cropDraft.e - cropDraft.s + 1} frames, ${((cropDraft.e - cropDraft.s + 1) / (motionData?.fps || 30)).toFixed(2)}s)`
+    : '';
+  el.innerText = `draft: ${s} / ${e}${dur}`;
+}
+
+function _renderCropList() {
+  const list = document.getElementById('cropSegList');
+  list.innerHTML = '';
+  if (!cropSegments.length) {
+    list.innerHTML = '<div style="padding:6px; font-size:10px; color:var(--text-dim); text-align:center;">no segments yet</div>';
+    return;
+  }
+  const fps = motionData?.fps || 30;
+  cropSegments.forEach((seg, i) => {
+    const n = seg.e - seg.s + 1;
+    const dur = (n / fps).toFixed(2);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:4px; align-items:center; padding:4px 6px; font-size:10.5px; border-bottom:1px solid rgba(255,255,255,0.05);';
+    row.innerHTML =
+      `<span style="flex:1; font-family:monospace;">#${i + 1} [${seg.s}, ${seg.e}] · ${n}f · ${dur}s</span>` +
+      `<button class="sec" data-seg-go="${i}" style="font-size:9px; padding:2px 5px;" title="Jump to start">↪</button>` +
+      `<button class="danger" data-seg-rm="${i}" style="font-size:9px; padding:2px 5px;" title="Remove">✕</button>`;
+    list.appendChild(row);
+  });
+  list.querySelectorAll('[data-seg-go]').forEach(b => {
+    b.onclick = () => {
+      const i = +b.getAttribute('data-seg-go');
+      stopPlayback();
+      update3DRobot(cropSegments[i].s); drawCurve();
+    };
+  });
+  list.querySelectorAll('[data-seg-rm]').forEach(b => {
+    b.onclick = () => {
+      const i = +b.getAttribute('data-seg-rm');
+      cropSegments.splice(i, 1);
+      _renderCropList();
+      drawCurve();   // refresh segment overlay on canvas
+    };
+  });
+}
+
+document.getElementById('cropSetStart').onclick = () => {
+  if (!motionData) return flash('load motion first');
+  cropDraft.s = currentFrame;
+  if (cropDraft.e >= 0 && cropDraft.e <= cropDraft.s) cropDraft.e = -1;
+  _renderCropDraft();
+};
+
+document.getElementById('cropSetEnd').onclick = () => {
+  if (!motionData) return flash('load motion first');
+  if (cropDraft.s < 0) return flash('set start first');
+  if (currentFrame <= cropDraft.s) return flash('end must be after start');
+  cropDraft.e = currentFrame;
+  _renderCropDraft();
+};
+
+document.getElementById('cropAddSeg').onclick = () => {
+  if (cropDraft.s < 0 || cropDraft.e <= cropDraft.s) {
+    return flash('mark start and end first');
+  }
+  cropSegments.push({ s: cropDraft.s, e: cropDraft.e });
+  cropDraft = { s: -1, e: -1 };
+  _renderCropDraft(); _renderCropList();
+  drawCurve();
+  flash(`segment ${cropSegments.length} added`);
+};
+
+document.getElementById('cropClear').onclick = () => {
+  cropSegments.length = 0;
+  cropDraft = { s: -1, e: -1 };
+  _renderCropDraft(); _renderCropList();
+  drawCurve();
+};
+
+document.getElementById('cropExport').onclick = async () => {
+  if (!motionData) return alert('No motion loaded');
+  if (!cropSegments.length) return alert('No segments to export — mark at least one with Set Start / Set End / Add.');
+  const formats = [];
+  if (document.getElementById('cropFmtNpz').checked) formats.push('npz');
+  if (document.getElementById('cropFmtCsv').checked) formats.push('csv');
+  if (document.getElementById('cropFmtPkl').checked) formats.push('pkl');
+  if (!formats.length) return alert('Pick at least one format (NPZ/CSV/PKL).');
+  const baseInput = document.getElementById('cropFilenameBase').value.trim();
+  const fallbackBase = (motionData._loaded_name || 'motion').replace(/\.(npz|csv|pkl)$/i, '') + '_cropped';
+  const base = baseInput || fallbackBase;
+
+  const btn = document.getElementById('cropExport');
+  btn.disabled = true; btn.innerText = 'exporting…';
+  try {
+    const res = await fetch('/crop_segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        motion: motionData,
+        segments: cropSegments.map(s => ({ start: s.s, end: s.e })),
+        formats,
+        filename_base: base,
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text(); throw new Error(t.slice(0, 200));
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${base}_segments.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+    flash(`exported ${cropSegments.length} seg × ${formats.length} fmt`);
+  } catch (err) {
+    alert('Export failed: ' + err.message);
+  } finally {
+    btn.disabled = false; btn.innerText = 'Export ZIP';
+  }
+};
+
+// Initial render so the empty state is visible
+_renderCropDraft();
+_renderCropList();
 
 async function loadMotionByPath(path, name) {
   if (!robot) return alert('Load URDF first');

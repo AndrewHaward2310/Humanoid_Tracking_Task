@@ -1,13 +1,23 @@
-"""Robot Motion Editor v3 — Motion Improvement Pipeline.
+"""editor_motion v1 — robot motion NPZ/CSV/PKL editor (Flask backend).
 
-Additions over v2:
-  • /pipeline/operators — list registered operators (schema for UI form).
-  • /pipeline/run        — apply an ordered operator list to a motion bundle.
-  • /pipeline/diagnostics — read-only quality report.
-  • /robot/limits        — joint pos/vel/effort limits from MJCF for overlays.
-  • Pipeline auto-reruns rederive_kinematics whenever joint_pos / base_* change,
-    so body_* + joint_vel stay FK-consistent.
-  • Runs on port 5002 so v1/v2/v3 can coexist.
+Endpoints:
+  • /robots                — list robot URDFs auto-discovered in static/.
+  • /upload_motion         — load NPZ via file upload.
+  • /upload_csv            — load CSV (vm_soma_retargeter format) via file upload.
+  • /upload_pkl            — load PKL (vm_retargeting / crop_robot_motion_ui format).
+  • /upload_bvh            — load BVH and retarget via soma_retargeter (optional dep).
+  • /load_motion_by_path   — load any of {.npz, .csv, .pkl} from a server-side path.
+  • /list_motions          — list motion files in a folder (filterable by extensions).
+  • /save_motion           — write current motion to NPZ; stream back as download.
+  • /save_csv              — write current motion to CSV.
+  • /save_pkl              — write current motion to PKL (crop_robot_motion_ui schema).
+  • /crop_segments         — crop multiple segments and zip them in NPZ/CSV/PKL formats.
+  • /pipeline/operators    — list registered improvement operators.
+  • /pipeline/run          — apply ordered operator list to a motion bundle.
+  • /pipeline/diagnostics  — read-only quality report.
+  • /robot/limits          — joint pos/vel/effort limits from MJCF for curve overlays.
+
+Runs on port 5002.
 """
 from __future__ import annotations
 
@@ -59,6 +69,23 @@ _JOINT_PRESETS: dict[int, list[str]] = {
 @app.route("/")
 def index():
   return render_template("index.html")
+
+
+class _FakeNpz:
+  """Dict that quacks like np.lib.npyio.NpzFile (`.files` + `__getitem__`).
+
+  Lets us reuse `_build_motion_response()` for PKL / CSV / synthesized inputs.
+  """
+
+  def __init__(self, d):
+    self._d = d
+    self.files = list(d.keys())
+
+  def __getitem__(self, k):
+    return self._d[k]
+
+  def __contains__(self, k):
+    return k in self._d
 
 
 def _build_motion_response(data) -> dict:
@@ -176,19 +203,36 @@ def list_robots():
   return jsonify({"robots": robots})
 
 
+_DEFAULT_MOTION_EXTS = ("npz", "csv", "pkl")
+
+
+def _parse_exts(raw: str | None) -> tuple[str, ...]:
+  if not raw:
+    return _DEFAULT_MOTION_EXTS
+  out = tuple(e.strip().lower().lstrip(".") for e in raw.split(",") if e.strip())
+  return out or _DEFAULT_MOTION_EXTS
+
+
 @app.route("/list_motions", methods=["GET"])
 def list_motions():
-  """List .npz files in a server-side folder (non-recursive)."""
+  """List motion files (.npz/.csv/.pkl by default) in a server-side folder.
+
+  Query params:
+    dir   — required, absolute or ~/path folder.
+    exts  — optional comma-separated extension filter (e.g. "npz,pkl").
+  """
   folder = (request.args.get("dir") or "").strip()
   if not folder:
     return jsonify({"error": "dir is required"}), 400
   folder = os.path.expanduser(folder)
   if not os.path.isdir(folder):
     return jsonify({"error": f"not a directory: {folder}"}), 400
+  exts = _parse_exts(request.args.get("exts"))
   files = []
   try:
     for name in sorted(os.listdir(folder)):
-      if not name.lower().endswith(".npz"):
+      ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+      if ext not in exts:
         continue
       full = os.path.join(folder, name)
       if not os.path.isfile(full):
@@ -197,6 +241,7 @@ def list_motions():
         st = os.stat(full)
         files.append({
           "name": name,
+          "ext": ext,
           "path": os.path.abspath(full),
           "size": st.st_size,
           "mtime": st.st_mtime,
@@ -205,7 +250,26 @@ def list_motions():
         continue
   except OSError as e:
     return jsonify({"error": str(e)}), 500
-  return jsonify({"dir": os.path.abspath(folder), "files": files})
+  return jsonify({"dir": os.path.abspath(folder), "files": files, "exts": list(exts)})
+
+
+def _load_by_path(path: str) -> dict:
+  """Dispatch loader by file extension. Returns editor motion JSON."""
+  ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+  if ext == "npz":
+    data = np.load(path, allow_pickle=False)
+    return _build_motion_response(data)
+  if ext == "csv":
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+      return _parse_csv_text(f.read())
+  if ext == "pkl":
+    import pickle
+    with open(path, "rb") as f:
+      d = pickle.load(f)
+    if not isinstance(d, dict):
+      raise ValueError("PKL root must be a dict")
+    return _parse_pkl_dict(d)
+  raise ValueError(f"unsupported extension: {ext or '(none)'}")
 
 
 @app.route("/load_motion_by_path", methods=["POST"])
@@ -218,8 +282,7 @@ def load_motion_by_path():
   if not os.path.isfile(path):
     return jsonify({"error": f"not a file: {path}"}), 400
   try:
-    data = np.load(path, allow_pickle=False)
-    resp = _build_motion_response(data)
+    resp = _load_by_path(path)
     resp["_loaded_path"] = os.path.abspath(path)
     resp["_loaded_name"] = os.path.basename(path)
     return jsonify(resp)
@@ -293,75 +356,68 @@ def _csv_header(joint_names: list[str]) -> list[str]:
   )
 
 
+def _parse_csv_text(text: str) -> dict:
+  """Parse vm_soma_retargeter-format CSV text into the editor's motion JSON.
+
+  Header: Frame, root_translateX/Y/Z (cm), root_quatX/Y/Z/W, <joint_names...>
+  """
+  import csv as csv_mod
+  lines = text.splitlines()
+  reader = csv_mod.reader(lines)
+  rows = list(reader)
+  if not rows:
+    raise ValueError("empty CSV")
+  header = [c.strip() for c in rows[0]]
+  body = rows[1:]
+  if len(body) < 1:
+    raise ValueError("no data rows")
+
+  def col(name):
+    try:
+      return header.index(name)
+    except ValueError:
+      return -1
+
+  rt_idx = [col("root_translateX"), col("root_translateY"), col("root_translateZ")]
+  rq_idx = [col("root_quatX"), col("root_quatY"), col("root_quatZ"), col("root_quatW")]
+  if any(i < 0 for i in rt_idx + rq_idx):
+    raise ValueError("CSV missing root_translate*/root_quat* columns")
+
+  last_root_col = max(rq_idx)
+  joint_names = header[last_root_col + 1:]
+  T = len(body)
+  nj = len(joint_names)
+  jp = np.zeros((T, nj), dtype=np.float64)
+  bp = np.zeros((T, 3), dtype=np.float64)
+  bq = np.zeros((T, 4), dtype=np.float64)  # editor uses [w,x,y,z]
+  for ti, r in enumerate(body):
+    bp[ti] = [float(r[rt_idx[0]]) / 100.0,
+              float(r[rt_idx[1]]) / 100.0,
+              float(r[rt_idx[2]]) / 100.0]
+    qx = float(r[rq_idx[0]]); qy = float(r[rq_idx[1]])
+    qz = float(r[rq_idx[2]]); qw = float(r[rq_idx[3]])
+    bq[ti] = [qw, qx, qy, qz]
+    for ji in range(nj):
+      v = r[last_root_col + 1 + ji].strip() if last_root_col + 1 + ji < len(r) else ""
+      jp[ti, ji] = float(v) if v else 0.0
+
+  return _build_motion_response(_FakeNpz({
+    "joint_pos": jp,
+    "base_pos_w": bp,
+    "base_quat_w": bq,
+    "joint_names": np.array(joint_names),
+    "fps": np.array([30.0]),
+  }))
+
+
 @app.route("/upload_csv", methods=["POST"])
 def upload_csv():
   if "file" not in request.files:
     return jsonify({"error": "No file part"}), 400
   f = request.files["file"]
   try:
-    import csv as csv_mod
-    text = f.read().decode("utf-8", errors="replace").splitlines()
-    reader = csv_mod.reader(text)
-    rows = list(reader)
-    if not rows:
-      return jsonify({"error": "empty CSV"}), 400
-    header = [c.strip() for c in rows[0]]
-    body = rows[1:]
-    if len(body) < 1:
-      return jsonify({"error": "no data rows"}), 400
-
-    # Locate columns
-    def col(name):
-      try:
-        return header.index(name)
-      except ValueError:
-        return -1
-
-    has_frame = col("Frame") == 0  # optional first col
-    base_off = 1 if has_frame else 0
-    rt_idx = [col("root_translateX"), col("root_translateY"), col("root_translateZ")]
-    rq_idx = [col("root_quatX"), col("root_quatY"), col("root_quatZ"), col("root_quatW")]
-    if any(i < 0 for i in rt_idx + rq_idx):
-      return jsonify({"error": "CSV missing root_translate*/root_quat* columns"}), 400
-
-    # Joint columns are everything after root_quatW
-    last_root_col = max(rq_idx)
-    joint_names = header[last_root_col + 1:]
-
-    T = len(body)
-    nj = len(joint_names)
-    jp = np.zeros((T, nj), dtype=np.float64)
-    bp = np.zeros((T, 3), dtype=np.float64)
-    bq = np.zeros((T, 4), dtype=np.float64)  # editor uses [w,x,y,z]
-    for ti, r in enumerate(body):
-      bp[ti] = [float(r[rt_idx[0]]) / 100.0,
-                float(r[rt_idx[1]]) / 100.0,
-                float(r[rt_idx[2]]) / 100.0]
-      qx = float(r[rq_idx[0]]); qy = float(r[rq_idx[1]])
-      qz = float(r[rq_idx[2]]); qw = float(r[rq_idx[3]])
-      bq[ti] = [qw, qx, qy, qz]
-      for ji in range(nj):
-        v = r[last_root_col + 1 + ji].strip() if last_root_col + 1 + ji < len(r) else ""
-        jp[ti, ji] = float(v) if v else 0.0
-
-    # Match the schema of _build_motion_response by faking an NpzFile-like dict.
-    class _FakeNpz:
-      def __init__(self, d):
-        self._d = d
-        self.files = list(d.keys())
-      def __getitem__(self, k): return self._d[k]
-      def __contains__(self, k): return k in self._d
-
-    fake = _FakeNpz({
-      "joint_pos": jp,
-      "base_pos_w": bp,
-      "base_quat_w": bq,
-      "joint_names": np.array(joint_names),
-      "fps": np.array([30.0]),
-    })
-    resp = _build_motion_response(fake)
-    resp["_loaded_path"] = ""
-    return jsonify(resp)
+    text = f.read().decode("utf-8", errors="replace")
+    return jsonify(_parse_csv_text(text))
   except Exception as e:
     import traceback
     traceback.print_exc()
@@ -391,6 +447,252 @@ def save_csv():
     out = io.BytesIO(mem.getvalue().encode("utf-8"))
     name = str(data.get("_loaded_name") or "edited_motion").rsplit(".", 1)[0] + ".csv"
     return send_file(out, mimetype="text/csv", as_attachment=True, download_name=name)
+  except Exception as e:
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": str(e)}), 500
+
+
+# --------------------------- PKL import / export ---------------------------
+#
+# Two on-disk schemas are supported:
+#   (a) raw vm_retargeting style (e.g. vm_retargeting/output/motion_clip.pkl):
+#         {fps, root_pos:(N,3) m, root_rot:(N,4) xyzw, dof_pos:(N,J) rad,
+#          joint_names, local_body_pos, link_body_list}
+#   (b) crop_robot_motion_ui.py style (output of that tool):
+#         {motion_fps, motion_root_pos, motion_root_rot (wxyz),
+#          motion_dof_pos, motion_local_body_pos, motion_link_body_list,
+#          motion_data, source_motion, source_frame_range}
+# Editor-internal schema is always wxyz + meters.
+
+
+def _parse_pkl_dict(d: dict) -> dict:
+  """Convert a loaded .pkl dict (either schema) into editor motion JSON."""
+  if "motion_root_pos" in d:
+    # crop-UI schema — wxyz on disk
+    rp = np.asarray(d["motion_root_pos"], dtype=np.float64)
+    rq = np.asarray(d["motion_root_rot"], dtype=np.float64)  # already wxyz
+    dof = np.asarray(d["motion_dof_pos"], dtype=np.float64)
+    fps = float(d.get("motion_fps", 30.0))
+    body_names = list(d.get("motion_link_body_list") or [])
+    local_body = d.get("motion_local_body_pos")
+  elif "root_pos" in d:
+    # raw vm_retargeting schema — xyzw on disk → convert to wxyz
+    rp = np.asarray(d["root_pos"], dtype=np.float64)
+    rq_xyzw = np.asarray(d["root_rot"], dtype=np.float64)
+    if rq_xyzw.ndim == 2 and rq_xyzw.shape[1] == 4:
+      rq = rq_xyzw[:, [3, 0, 1, 2]]
+    else:
+      raise ValueError(f"root_rot has unexpected shape {rq_xyzw.shape}")
+    dof = np.asarray(d["dof_pos"], dtype=np.float64)
+    fps = float(d.get("fps", 30.0))
+    body_names = list(d.get("link_body_list") or [])
+    local_body = d.get("local_body_pos")
+  else:
+    raise ValueError("PKL missing root_pos / motion_root_pos")
+
+  # joint_names: prefer top-level, else nested motion_data dict
+  joint_names = list(d.get("joint_names") or [])
+  if not joint_names and isinstance(d.get("motion_data"), dict):
+    joint_names = list(d["motion_data"].get("joint_names") or [])
+
+  payload = {
+    "joint_pos": dof,
+    "base_pos_w": rp,
+    "base_quat_w": rq,
+    "fps": np.array([fps]),
+  }
+  if joint_names:
+    payload["joint_names"] = np.array(joint_names)
+  if body_names:
+    payload["body_names"] = np.array(body_names)
+  # body_pos_w from local_body_pos if shape matches (T, B, 3)
+  if local_body is not None:
+    arr = np.asarray(local_body)
+    if arr.ndim == 3 and arr.shape[0] == rp.shape[0]:
+      payload["body_pos_w"] = arr.astype(np.float64)
+  return _build_motion_response(_FakeNpz(payload))
+
+
+@app.route("/upload_pkl", methods=["POST"])
+def upload_pkl():
+  if "file" not in request.files:
+    return jsonify({"error": "No file part"}), 400
+  f = request.files["file"]
+  try:
+    import pickle
+    d = pickle.load(f.stream)
+    if not isinstance(d, dict):
+      return jsonify({"error": "PKL root must be a dict"}), 400
+    resp = _parse_pkl_dict(d)
+    resp["_loaded_name"] = os.path.basename(f.filename or "motion.pkl")
+    return jsonify(resp)
+  except Exception as e:
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": str(e)}), 500
+
+
+def _motion_to_pkl_dict(motion: dict, source: str = "", frame_range=None) -> dict:
+  """Build a pickle-able dict matching crop_robot_motion_ui.py output schema."""
+  jp = np.asarray(motion["joint_pos"], dtype=np.float64)
+  bp = np.asarray(motion.get("base_pos_w") or np.zeros((jp.shape[0], 3)), dtype=np.float64)
+  bq = np.asarray(motion.get("base_quat_w") or np.tile([1.0, 0.0, 0.0, 0.0], (jp.shape[0], 1)),
+                  dtype=np.float64)
+  out = {
+    "motion_root_pos": bp,
+    "motion_root_rot": bq,                       # wxyz (matches load_robot_motion convention)
+    "motion_dof_pos": jp,
+    "motion_fps": float(motion.get("fps", motion.get("framerate", 30.0))),
+    "motion_local_body_pos": np.asarray(motion.get("body_pos_w") or [], dtype=np.float64),
+    "motion_link_body_list": list(motion.get("body_names") or []),
+    "joint_names": list(motion.get("joint_names") or []),
+  }
+  if source:
+    out["source_motion"] = source
+  if frame_range is not None:
+    out["source_frame_range"] = np.asarray(list(frame_range), dtype=np.int64)
+  return out
+
+
+@app.route("/save_pkl", methods=["POST"])
+def save_pkl():
+  try:
+    import pickle
+    data = request.json or {}
+    if "joint_pos" not in data:
+      return jsonify({"error": "joint_pos required"}), 400
+    out = _motion_to_pkl_dict(data, source=str(data.get("_loaded_name") or ""))
+    mem = io.BytesIO()
+    pickle.dump(out, mem)
+    mem.seek(0)
+    name = str(data.get("_loaded_name") or "edited_motion").rsplit(".", 1)[0] + ".pkl"
+    return send_file(mem, mimetype="application/octet-stream", as_attachment=True, download_name=name)
+  except Exception as e:
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": str(e)}), 500
+
+
+# --------------------------- Crop multi-segment ZIP -------------------------
+
+
+_FRAME_AXIS_KEYS = (
+  "joint_pos", "joint_vel",
+  "base_pos_w", "base_quat_w",
+  "body_pos_w", "body_quat_w",
+  "body_lin_vel_w", "body_ang_vel_w",
+)
+
+
+def _slice_motion_dict(motion: dict, s: int, e: int) -> dict:
+  """Return a shallow copy of `motion` with all frame-axis arrays sliced to [s, e).
+
+  Mirrors the JS `_sliceMotionData()` helper. `e` is exclusive (Python convention).
+  """
+  out = dict(motion)  # shallow copy of metadata
+  for k in _FRAME_AXIS_KEYS:
+    v = motion.get(k)
+    if not v:
+      continue
+    arr = list(v) if isinstance(v, list) else v
+    out[k] = arr[s:e]
+  out["num_frames"] = max(0, e - s)
+  return out
+
+
+def _motion_to_npz_bytes(motion: dict) -> bytes:
+  """Serialize editor motion JSON into NPZ bytes (same schema as /save_motion)."""
+  out_arrays = {}
+  for key in _FRAME_AXIS_KEYS:
+    v = motion.get(key)
+    if v:
+      out_arrays[key] = np.asarray(v, dtype=np.float64)
+  if motion.get("joint_names"):
+    out_arrays["joint_names"] = np.asarray(motion["joint_names"])
+  if motion.get("body_names"):
+    out_arrays["body_names"] = np.asarray(motion["body_names"])
+  if "fps" in motion:
+    out_arrays["fps"] = np.array(motion["fps"])
+  if "framerate" in motion:
+    out_arrays["framerate"] = np.array(motion["framerate"], dtype=np.float64)
+  mem = io.BytesIO()
+  np.savez_compressed(mem, **out_arrays)
+  return mem.getvalue()
+
+
+def _motion_to_csv_bytes(motion: dict) -> bytes:
+  """Serialize editor motion JSON into CSV bytes (vm_soma_retargeter format)."""
+  import csv as csv_mod
+  jp = np.asarray(motion["joint_pos"])
+  bp = np.asarray(motion.get("base_pos_w") or np.zeros((jp.shape[0], 3)))
+  bq = np.asarray(motion.get("base_quat_w") or np.tile([1.0, 0.0, 0.0, 0.0], (jp.shape[0], 1)))
+  joint_names = list(motion.get("joint_names") or [f"joint_{i}" for i in range(jp.shape[1])])
+  mem = io.StringIO()
+  w = csv_mod.writer(mem)
+  w.writerow(_csv_header(joint_names))
+  for i in range(jp.shape[0]):
+    px, py, pz = (bp[i] * 100.0).tolist()
+    qw, qx, qy, qz = bq[i].tolist()
+    w.writerow([i, px, py, pz, qx, qy, qz, qw, *jp[i].tolist()])
+  return mem.getvalue().encode("utf-8")
+
+
+def _motion_to_pkl_bytes(motion: dict, source: str = "", frame_range=None) -> bytes:
+  """Serialize editor motion JSON into PKL bytes (crop_robot_motion_ui schema)."""
+  import pickle
+  d = _motion_to_pkl_dict(motion, source=source, frame_range=frame_range)
+  return pickle.dumps(d)
+
+
+@app.route("/crop_segments", methods=["POST"])
+def crop_segments():
+  """Crop multiple frame segments from a motion and bundle them as a ZIP.
+
+  POST JSON body:
+    {
+      "motion": <full editor motion JSON>,
+      "segments": [{"start": 100, "end": 250}, ...],   # `end` inclusive
+      "formats": ["npz", "csv", "pkl"],                # any subset
+      "filename_base": "motion_cropped"
+    }
+  Returns: ZIP with `<base>_seg<N>.<ext>` for each segment × format combination.
+  """
+  try:
+    import zipfile
+    body = request.json or {}
+    motion = body.get("motion") or {}
+    segments = body.get("segments") or []
+    formats = set(body.get("formats") or ["npz", "csv", "pkl"])
+    base = (body.get("filename_base") or "motion_cropped").strip() or "motion_cropped"
+    base = base.replace("/", "_").replace("\\", "_")
+
+    if "joint_pos" not in motion:
+      return jsonify({"error": "motion.joint_pos required"}), 400
+    if not segments:
+      return jsonify({"error": "no segments provided"}), 400
+
+    N = len(motion["joint_pos"])
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as zf:
+      for i, seg in enumerate(segments, 1):
+        s = int(seg.get("start", 0))
+        e = int(seg.get("end", 0))
+        # `end` is inclusive on the wire — convert to exclusive for Python slicing
+        s = max(0, min(N - 1, s))
+        e_excl = max(s + 1, min(N, e + 1))
+        sub = _slice_motion_dict(motion, s, e_excl)
+        name = f"{base}_seg{i}"
+        if "npz" in formats:
+          zf.writestr(f"{name}.npz", _motion_to_npz_bytes(sub))
+        if "csv" in formats:
+          zf.writestr(f"{name}.csv", _motion_to_csv_bytes(sub))
+        if "pkl" in formats:
+          zf.writestr(f"{name}.pkl",
+                      _motion_to_pkl_bytes(sub, source=base, frame_range=(s, e_excl - 1)))
+    mem.seek(0)
+    return send_file(mem, mimetype="application/zip", as_attachment=True,
+                     download_name=f"{base}_segments.zip")
   except Exception as e:
     import traceback
     traceback.print_exc()

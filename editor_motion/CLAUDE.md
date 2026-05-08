@@ -1,96 +1,65 @@
-# editor_motion — Web-based robot motion editor (Flask + Three.js)
+# editor_motion v1 — Web-based robot motion editor (Flask + Three.js)
 
-Pipeline role: **upstream** = `vm_retargeting` (produces robot NPZ); **downstream** = `mjlab` (consumes refined NPZ for training).
-Folder was previously `robot-motion-editor-v3`, renamed during the 2026-05-04 reorg.
+Pipeline role: **upstream** = `vm_retargeting` (produces robot motion `.pkl/.npz`); **downstream** = `mjlab` (consumes refined NPZ for training).
 
 ## Quick commands
 
 ```bash
 cd ~/Documents/Humanoid_Tracking_Task/editor_motion
-pip install flask numpy scipy           # one-time
-python app.py                            # Flask server on http://127.0.0.1:5000
-```
-
-Convert / fix utilities (run from this folder):
-
-```bash
-python convert_to_mujoco.py --npz <isaac.npz> --xml static/M2v6/M2v6.xml --out <mujoco.npz>
-python csv_to_npz_m23_edit.py            # CSV → NPZ via Isaac Lab simulator
+pip install -r requirements.txt          # one-time
+python app.py                             # Flask server on http://127.0.0.1:5002
 ```
 
 ## Frequently-used files
 
-- `app.py` — Flask server, routes `/`, `/upload_motion`, `/save_motion`
-- `convert_to_mujoco.py` — Isaac Lab NPZ → MuJoCo NPZ (joint/body remap + FK recompute)
-- `csv_to_npz_m23_edit.py` — CSV motion → NPZ
-- `motion_pipeline/{limits,registry,runner,kinematics}.py` — modular processing pipeline
-- `templates/index.html` — single-file ES6 frontend (3D + 2D editor)
-- `static/M2v6/m26_constants.py` — M26 robot config (actuators, joint groups, collisions)
-- `static/M2v6/M2v6.xml` — primary URDF/XML used by `convert_to_mujoco.py`
+- `app.py` — Flask server. Endpoints: `/` UI, `/robots`, `/upload_motion|csv|pkl|bvh`, `/load_motion_by_path`, `/list_motions`, `/save_motion|csv|pkl`, `/crop_segments`, `/pipeline/*`, `/robot/limits`.
+- `templates/index.html` — single-file ES6 frontend (3D viewport + 2D curve editor + sidebar + Scene Options panel + Stats panel + playback bar).
+- `motion_pipeline/{limits,registry,runner,kinematics}.py` — modular processing pipeline (smooth, foot_grounding, clamp_joint_limits, ...).
+- `static/<robot>/urdf/*.urdf` — auto-discovered robot URDFs.
+- `static/M2v6/M2v6.xml` — MJCF used for joint-limit overlay + pipeline FK.
+- `convert_to_mujoco.py` — Isaac-Lab NPZ → MuJoCo NPZ (joint/body remap + FK recompute).
 
-## NPZ format (must match)
+## Supported motion formats
+
+| Format | Translation | Quat | Notes |
+|--------|------|------|-------|
+| `.npz` | `base_pos_w` (m) | `base_quat_w` (wxyz) | Editor's canonical schema. |
+| `.csv` | cm | xyzw | vm_soma_retargeter format (`Frame, root_translateXYZ, root_quatXYZW, joints`). |
+| `.pkl` | m | wxyz on load (xyzw on disk for raw vm_retargeting / wxyz for crop-UI style) | Two schemas detected automatically. |
+| `.bvh` | — | — | Loaded via `soma_retargeter` retargeter (optional dep). |
+
+## NPZ canonical schema
 
 | Key | Shape | Notes |
 |-----|-------|-------|
-| `joint_pos` | `(F, J)` | joint angles |
-| `base_pos_w` | `(F, 3)` | global `[x, y, z]` |
+| `joint_pos` | `(F, J)` | joint angles, radians |
+| `base_pos_w` | `(F, 3)` | world XYZ, meters |
 | `base_quat_w` | `(F, 4)` | quaternion `[w, x, y, z]` |
-| `joint_names` | list | match URDF |
-| `framerate` | int | default 30 |
+| `joint_names` | list | URDF joint names |
+| `fps` / `framerate` | float | default 30 |
 
 Optional: `joint_vel`, `body_pos_w`, `body_quat_w`, `body_lin_vel_w`, `body_ang_vel_w`, `body_names`.
 
 ## Cross-refs
 
-- Input: NPZ from `../vm_retargeting/output/*.pkl` (after pkl→npz) or any prior `.npz`.
-- Output: refined NPZ consumed by `../mjlab/scripts/train_*.sh` (`MOTION_FILE=...`).
-
----
-
-## Project Overview (legacy)
-
-Robot Motion Editor is a web-based tool for visualizing, editing, and smoothing robot motion data. It combines a Three.js 3D robot visualizer with a 2D curve editor to modify joint angles, base positions, and base rotations frame-by-frame. Developed by Project Instinct group.
-
-## Running the Application
-
-```bash
-pip install flask numpy          # install dependencies (scipy optional, for advanced smoothing)
-python app.py                    # starts Flask server on http://127.0.0.1:5000
-```
-
-Robot URDF and mesh files must be placed under `static/` before loading.
+- Input: `.pkl` from `../vm_retargeting/output/`, `.csv` from `../vm_soma_retargeter/`, `.npz` from any prior session.
+- Output: refined NPZ → `../mjlab/scripts/train_*.sh` (`MOTION_FILE=...`).
 
 ## Architecture
 
-**Backend** (`app.py`): Flask server with three routes:
-- `GET /` — serves the editor UI
-- `POST /upload_motion` — parses uploaded `.npz` files, extracts motion arrays (joint_pos, base_pos_w, base_quat_w, etc.), converts NumPy arrays to JSON
-- `POST /save_motion` — reconstructs NumPy arrays from edited JSON data, streams `.npz` file back to browser
+**Backend** (`app.py`):
+- Loads NPZ/CSV/PKL into a unified JSON payload via `_build_motion_response()`.
+- `_load_pkl_to_motion()` auto-detects raw vm_retargeting vs crop_robot_motion_ui schema.
+- `_motion_to_pkl_bytes() / _to_csv_bytes() / _to_npz_bytes()` produce identical schemas across formats.
+- `/crop_segments` zips multi-segment exports in all 3 formats.
 
-**Frontend** (`templates/index.html`): Single-file ES6 module application with three integrated systems:
-1. **3D Visualization** — Three.js scene with urdf-loader for robot model rendering; updates joint values and base pose per frame
-2. **2D Curve Editor** — HTML5 canvas for visualizing/editing motion curves via click-and-drag; unified `getChannelValue()`/`setChannelValue()` API handles joints, base position (XYZ), and base rotation (RPY converted to/from quaternions)
-3. **UI Controls** — sidebar for robot/motion loading, timeline slider, channel list, keyboard controls (arrow keys for frame stepping and value adjustment), smooth and save buttons
+**Frontend** (`templates/index.html`):
+1. **3D viewport** — Three.js + urdf-loader; pose-per-frame; sky gradient + checkered floor.
+2. **Curve editor** — HTML5 canvas for click-and-drag editing; range select, K1/K2 keyframes, smooth.
+3. **Sidebar** — Robot dropdown · Unified file input (3 formats) · Folder Quick-Load · Channels · Channel Editor · Improvement Pipeline.
+4. **Stats panel (top-right)** — Render FPS · Frame · Time · Motion FPS · Joints · Bodies.
+5. **Scene Options (bottom-right)** — Save NPZ/CSV/PKL · Trim (single range) · Crop (multi-segment ZIP) · Import BVH · Visibility toggles.
 
-**Data flow**: NPZ file → Flask parses to JSON → frontend renders 3D + 2D → user edits curves → Flask reconstructs NPZ → download
+## Frontend dependencies
 
-## NPZ Data Format
-
-Expected keys in `.npz` motion files:
-- `joint_pos`: `(num_frames, num_joints)` — joint angles
-- `base_pos_w`: `(num_frames, 3)` — global position `[x, y, z]`
-- `base_quat_w`: `(num_frames, 4)` — quaternion `[w, x, y, z]`
-- `joint_names`: list of strings matching URDF joint names
-- `framerate`: int (defaults to 30 if missing)
-
-Optional: `joint_vel`, `body_pos_w`, `body_quat_w`, `body_lin_vel_w`, `body_ang_vel_w`, `body_names`
-
-## Additional Tools
-
-- `convert_to_mujoco.py` — converts edited NPZ (Isaac Lab format) to MuJoCo-compatible format with joint/body name remapping and forward kinematics recomputation
-- `csv_to_npz_m23_edit.py` — converts CSV motion files to NPZ using Isaac Lab simulator
-- `static/M2v6/m26_constants.py` — M26 robot configuration (actuator params, joint groupings, collision config)
-
-## Frontend Dependencies
-
-Three.js v0.160.0 and urdf-loader v0.12.1 are loaded via CDN importmap in `index.html` — no npm/node build step required.
+Three.js v0.160.0 + urdf-loader v0.12.1 via CDN importmap. No build step.
